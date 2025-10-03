@@ -40,8 +40,16 @@ async function githubFetch(endpoint, options = {}) {
 // Tool definitions for AI
 const tools = [
     {
+        name: 'list_tools',
+        description: 'Lists all available tools and their capabilities. Use this when users ask "what can you do", "what are your capabilities", "help", etc.',
+        parameters: {
+            type: 'object',
+            properties: {}
+        }
+    },
+    {
         name: 'list_repos',
-        description: 'CALL THIS to list/show all GitHub repositories. Required when user asks to list/show repos.',
+        description: 'Lists all GitHub repositories. Use this when users specifically ask to see or list repositories.',
         parameters: {
             type: 'object',
             properties: {
@@ -244,6 +252,16 @@ const tools = [
 async function executeTool(toolName, args) {
     try {
         switch (toolName) {
+            case 'list_tools': {
+                return {
+                    tools: tools.map(tool => ({
+                        name: tool.name,
+                        description: tool.description,
+                        parameters: tool.parameters.properties
+                    }))
+                };
+            }
+
             case 'list_repos': {
                 const type = args.type || 'owner';
                 const response = await githubFetch(`/user/repos?type=${type}&per_page=100&sort=updated`);
@@ -530,9 +548,21 @@ When user mentions files without specifying repo, assume they mean repo: ${ctx.c
             }
         }
         
-        const systemPrompt = `You are a GitHub AI agent. You MUST use the provided tools to perform actions. Be smart and ask clarifying questions if needed.
+        const systemPrompt = `You are a helpful GitHub AI assistant. You can engage in conversation AND execute GitHub operations using tools.
+
+CONVERSATIONAL MODE:
+- For general questions like "what can you do", "help", "hello" - respond conversationally
+- Use the list_tools() function when users ask about capabilities
+- Be friendly and conversational for casual interactions
+
+TOOL EXECUTION MODE:
+Only use tools when users explicitly request GitHub operations like:
+- "list my repositories", "show repos", "create repo", "delete repo"
+- "create file", "update file", "delete file", "read file"
+- "list files", "show files in repo"
 
 AVAILABLE TOOLS:
+- list_tools() - Shows all available tools and capabilities
 - list_repos() - Lists all repositories
 - create_repo(name, description, private) - Creates a new repository
 - delete_repo(repo) - Deletes a repository (format: username/repo-name)
@@ -721,6 +751,14 @@ When ready to act, output ONLY the function call. NO explanations, NO code block
                     // Check original message for direct commands
                     const originalMessage = message.trim();
                     console.log('Checking original message:', originalMessage);
+                    
+                    // If no function was called by AI, return the AI's natural response
+                    if (!functionName) {
+                        responseText = responseTextContent;
+                        return res.json({
+                            response: responseText
+                        });
+                    }
                     
                     if (originalMessage.toLowerCase().includes("delete the repository")) {
                         functionName = 'delete_repo';

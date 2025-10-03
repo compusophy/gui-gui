@@ -1,0 +1,71 @@
+<div class="container">
+    <!-- Tools Sidebar -->
+    <div class="sidebar">
+        <h2>Tools</h2>
+        <div class="file-tree">
+            <div onclick="loadRepositories()" class="repo-item">
+                List Repositories
+            </div>
+            <div onclick="showCreateRepoDialog()" class="repo-item">
+                Create Repository
+            </div>
+            <div onclick="showDeleteRepoDialog()" class="repo-item">
+                Delete Repository
+            </div>
+            <div onclick="showCreateFileDialog()" class="repo-item">
+                Create File
+            </div>
+            <div onclick="saveFile()" class="repo-item">
+                Save File
+            </div>
+            <div onclick="showDeleteFileDialog()" class="repo-item">
+                Delete File
+            </div>
+        </div>
+    </div>
+
+    <!-- Repositories Sidebar -->
+    <div class="repo-sidebar">
+        <h2>Repositories</h2>
+        <div id="repo-list" class="file-tree">
+            <div class="empty-state"><span class="loading"></span> Loading repositories...</div>
+        </div>
+    </div>
+
+    <!-- Files Sidebar -->
+    <div class="files-sidebar">
+        <h2>Files</h2>
+        <div id="files-list" class="file-tree">
+            <div class="empty-state">Select a repository to view files</div>
+        </div>
+    </div>
+
+    <!-- Editor Panel -->
+    <div class="editor-panel">
+        <h2>Editor</h2>
+        <textarea id="editor" placeholder="Select a file to edit..." disabled style="flex: 1;"></textarea>
+    </div>
+
+    <!-- Chat Panel -->
+    <div class="chat-panel">
+        <h2>Chat</h2>
+        <div class="chat-messages" id="chat-messages" style="flex: 1; margin-bottom: 16px;">
+        </div>
+        <form id="chat-form" hx-post="/chat" 
+              hx-target="#chat-messages" 
+              hx-swap="none"
+              hx-on::before-request="handleChatSubmit(event)"
+              hx-on::after-request="handleChatResponse(event)">
+            <div class="chat-input-area">
+                <input type="text" 
+                       id="chat-input" 
+                       name="message" 
+                       placeholder="Ask me anything..." 
+                       autocomplete="off"
+                       required>
+                <button type="submit">Send</button>
+            </div>
+        </form>
+    </div>
+</div>
+
