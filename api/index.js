@@ -215,6 +215,28 @@ const tools = [
             },
             required: ['repo', 'prNumber']
         }
+    },
+    {
+        name: 'delete_file',
+        description: 'Deletes a file from a GitHub repository',
+        parameters: {
+            type: 'object',
+            properties: {
+                repo: {
+                    type: 'string',
+                    description: 'Repository name (format: username/repo-name)'
+                },
+                path: {
+                    type: 'string',
+                    description: 'The file path to delete'
+                },
+                message: {
+                    type: 'string',
+                    description: 'Commit message for the deletion'
+                }
+            },
+            required: ['repo', 'path']
+        }
     }
 ];
 
@@ -415,6 +437,32 @@ async function executeTool(toolName, args) {
                 return { success: `PR #${args.prNumber} merged successfully` };
             }
 
+            case 'delete_file': {
+                // Get the file to get its SHA
+                const fileResponse = await githubFetch(`/repos/${args.repo}/contents/${args.path}`);
+                if (!fileResponse.ok) {
+                    const statusText = await fileResponse.text();
+                    return { error: `Failed to get file info: ${statusText}` };
+                }
+                const fileData = await fileResponse.json();
+
+                // Delete the file
+                const deleteResponse = await githubFetch(`/repos/${args.repo}/contents/${args.path}`, {
+                    method: 'DELETE',
+                    body: JSON.stringify({
+                        message: args.message || `Delete ${args.path}`,
+                        sha: fileData.sha
+                    })
+                });
+
+                if (!deleteResponse.ok) {
+                    const errorText = await deleteResponse.text();
+                    return { error: `Failed to delete file: ${errorText}` };
+                }
+
+                return { success: `File ${args.path} deleted successfully` };
+            }
+
             default:
                 return { error: `Unknown tool: ${toolName}` };
         }
@@ -434,6 +482,28 @@ app.post('/chat', async (req, res) => {
 
         if (!githubToken) {
             return res.json({ error: 'GITHUB_TOKEN not configured' });
+        }
+
+        // Handle force delete file command
+        if (message.startsWith('FORCE_DELETE_FILE:')) {
+            const parts = message.replace('FORCE_DELETE_FILE:', '').split(':');
+            const repo = parts[0];
+            const path = parts.slice(1).join(':'); // In case path contains ':'
+            
+            const result = await executeTool('delete_file', { repo, path });
+            
+            if (result.error) {
+                return res.json({ error: result.error });
+            }
+            
+            return res.json({
+                response: result.success,
+                toolCalls: [{
+                    name: 'delete_file',
+                    args: { repo, path },
+                    result
+                }]
+            });
         }
 
         const ai = new GoogleGenAI({ apiKey: geminiApiKey });
@@ -469,6 +539,7 @@ AVAILABLE TOOLS:
 - list_files(repo, path) - Lists files in a repo
 - read_file(repo, path) - Reads a file
 - update_file(repo, path, content, message) - Updates OR CREATES a file (creates if doesn't exist)
+- delete_file(repo, path, message) - Deletes a file from a repository
 
 IMPORTANT RULES:
 1. When user has a file open and says "update this", "change the readme", etc. - use the CURRENT CONTEXT below
@@ -586,6 +657,7 @@ When ready to act, output ONLY the function call. NO explanations, NO code block
             }
 
             console.log('Response text content:', responseTextContent);
+            console.log('Full response object:', JSON.stringify(response, null, 2));
 
             // Check if the response is JSON that contains tool calls
             let jsonMatch = null;
@@ -646,24 +718,83 @@ When ready to act, output ONLY the function call. NO explanations, NO code block
                     }
                 } else {
                     // Handle natural language input for specific functions
-                    if (cleanedText.includes("Delete the repository")) {
+                    // Check original message for direct commands
+                    const originalMessage = message.trim();
+                    console.log('Checking original message:', originalMessage);
+                    
+                    if (originalMessage.toLowerCase().includes("delete the repository")) {
                         functionName = 'delete_repo';
-                        // Extract repository name from quotes
-                        const repoMatch = cleanedText.match(/Delete the repository ['"](.+?)['"]/);
+                        // Extract repository name from quotes or after "repository "
+                        let repoMatch = originalMessage.match(/[Dd]elete the repository ['"](.+?)['"]/);
+                        console.log('Regex with quotes result:', repoMatch);
+                        if (!repoMatch) {
+                            // Try without quotes
+                            repoMatch = originalMessage.match(/[Dd]elete the repository\s+(\S+)/);
+                            console.log('Regex without quotes result:', repoMatch);
+                        }
                         if (repoMatch) {
                             args.repo = `${githubUsername}/${repoMatch[1]}`;
+                            console.log('Extracted delete repo args:', args);
+                        } else {
+                            console.log('Failed to extract repo name from:', originalMessage);
+                        }
+                    } else if (cleanedText.includes("Delete the repository")) {
+                        functionName = 'delete_repo';
+                        // Extract repository name from quotes or after "repository "
+                        let repoMatch = cleanedText.match(/Delete the repository ['"](.+?)['"]/);
+                        if (!repoMatch) {
+                            // Try without quotes
+                            repoMatch = cleanedText.match(/Delete the repository\s+(\S+)/);
+                        }
+                        if (repoMatch) {
+                            args.repo = `${githubUsername}/${repoMatch[1]}`;
+                            console.log('Extracted delete repo args from cleaned text:', args);
                         }
                     } else if (cleanedText.includes("Create a new repository called")) {
                         functionName = 'create_repo';
-                        // Extract repository name from quotes
-                        const repoMatch = cleanedText.match(/Create a new repository called ['"](.+?)['"]/);
+                        // Extract repository name from quotes or after "called "
+                        let repoMatch = cleanedText.match(/Create a new repository called ['"](.+?)['"]/);
+                        if (!repoMatch) {
+                            repoMatch = cleanedText.match(/Create a new repository called\s+(\S+)/);
+                        }
                         if (repoMatch) {
                             args.name = repoMatch[1];
                         }
+                    } else if (originalMessage.toLowerCase().includes("delete the file")) {
+                        functionName = 'delete_file';
+                        // Extract file name from quotes or after "file "
+                        let fileMatch = originalMessage.match(/[Dd]elete the file ['"](.+?)['"]/);
+                        console.log('Regex with quotes result for file:', fileMatch);
+                        if (!fileMatch) {
+                            // Try without quotes
+                            fileMatch = originalMessage.match(/[Dd]elete the file\s+(\S+)/);
+                            console.log('Regex without quotes result for file:', fileMatch);
+                        }
+                        if (fileMatch) {
+                            args.path = fileMatch[1];
+                            console.log('Extracted delete file args:', args);
+                        } else {
+                            console.log('Failed to extract file name from:', originalMessage);
+                        }
+                    } else if (cleanedText.includes("Delete the file")) {
+                        functionName = 'delete_file';
+                        // Extract file name from quotes or after "file "
+                        let fileMatch = cleanedText.match(/Delete the file ['"](.+?)['"]/);
+                        if (!fileMatch) {
+                            // Try without quotes
+                            fileMatch = cleanedText.match(/Delete the file\s+(\S+)/);
+                        }
+                        if (fileMatch) {
+                            args.path = fileMatch[1];
+                            console.log('Extracted delete file args from cleaned text:', args);
+                        }
                     } else if (cleanedText.includes("Create a new file called")) {
                         functionName = 'update_file';
-                        // Extract filename from quotes
-                        const fileMatch = cleanedText.match(/Create a new file called ['"](.+?)['"]/);
+                        // Extract filename from quotes or after "called "
+                        let fileMatch = cleanedText.match(/Create a new file called ['"](.+?)['"]/);
+                        if (!fileMatch) {
+                            fileMatch = cleanedText.match(/Create a new file called\s+(\S+)/);
+                        }
                         if (fileMatch) {
                             args.path = fileMatch[1];
                             args.content = `# ${fileMatch[1]}\n\nCreated by GitHub AI Agent\n\nAdd your content here...`;
@@ -679,8 +810,23 @@ When ready to act, output ONLY the function call. NO explanations, NO code block
                     if (context) {
                         try {
                             const ctx = JSON.parse(context);
+                            console.log('Context parsed:', ctx);
+                            
+                            // For delete_repo, use currentRepo if repo not in args
+                            if (functionName === 'delete_repo' && !args.repo && ctx.currentRepo) {
+                                args.repo = ctx.currentRepo;
+                                console.log('Using context repo for delete_repo:', args.repo);
+                            }
+                            
+                            // For delete_file, use currentFile if path not in args
+                            if (functionName === 'delete_file' && !args.path && ctx.currentFile) {
+                                args.repo = ctx.currentFile.repo;
+                                args.path = ctx.currentFile.path;
+                                console.log('Using context file for delete_file:', args);
+                            }
+                            
+                            // For other file operations, use the current repository context
                             if (ctx.currentRepo && !args.repo) {
-                                // For file operations, use the current repository context
                                 if (functionName === 'update_file' || functionName === 'read_file' || functionName === 'list_files') {
                                     args.repo = ctx.currentRepo;
                                     console.log('Using context repo:', args.repo);
@@ -693,7 +839,12 @@ When ready to act, output ONLY the function call. NO explanations, NO code block
 
                     // Validate required arguments
                     if (functionName === 'delete_repo' && !args.repo) {
-                        responseText = `❌ Please specify a repository to delete. Example: "Delete the repository 'repository-name'"`;
+                        responseText = `❌ Please select a repository first, or specify it in your request. Example: "Delete the repository 'repository-name'"`;
+                        return res.json({
+                            response: responseText
+                        });
+                    } else if (functionName === 'delete_file' && (!args.repo || !args.path)) {
+                        responseText = `❌ Please select a file first, or specify it in your request. Example: "Delete the file 'filename.txt'"`;
                         return res.json({
                             response: responseText
                         });
@@ -710,7 +861,7 @@ When ready to act, output ONLY the function call. NO explanations, NO code block
                     }
 
                     // For file operations, we need a current repository context
-                    if ((functionName === 'update_file' || functionName === 'read_file' || functionName === 'list_files') && !args.repo) {
+                    if ((functionName === 'update_file' || functionName === 'read_file' || functionName === 'list_files' || functionName === 'delete_file') && !args.repo) {
                         responseText = `❌ Please select a repository first, or specify it in your request.`;
                         return res.json({
                             response: responseText
@@ -741,6 +892,32 @@ When ready to act, output ONLY the function call. NO explanations, NO code block
                         return res.json({
                             response: responseText,
                             pendingDeletion: args.repo
+                        });
+                    } else if (functionName === 'delete_file') {
+                        // First, check if the file exists
+                        const fileCheckResponse = await githubFetch(`/repos/${args.repo}/contents/${args.path}`);
+                        
+                        if (!fileCheckResponse.ok) {
+                            if (fileCheckResponse.status === 404) {
+                                responseText = `❌ File "${args.path}" not found in repository "${args.repo}". Cannot delete a file that doesn't exist.`;
+                            } else {
+                                responseText = `❌ Error checking file: ${fileCheckResponse.statusText}`;
+                            }
+                            
+                            return res.json({
+                                response: responseText
+                            });
+                        }
+                        
+                        // File exists, ask for confirmation
+                        responseText = `⚠️ WARNING: You are about to PERMANENTLY DELETE "${args.path}"\n\nThis will delete the file from "${args.repo}" forever.\n\nType "yes" to confirm deletion, or anything else to cancel.`;
+                        
+                        // Return special structure so frontend knows to wait for confirmation
+                        // Store both repo and path in pendingDeletion
+                        return res.json({
+                            response: responseText,
+                            pendingDeletion: `${args.repo}:::${args.path}`,
+                            deletionType: 'file'
                         });
                     } else {
                         // Execute the function call

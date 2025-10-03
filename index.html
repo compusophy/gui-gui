@@ -318,6 +318,9 @@
                 <div onclick="showCreateRepoDialog()" class="repo-item">
                     Create Repository
                 </div>
+                <div onclick="showDeleteRepoDialog()" class="repo-item">
+                    Delete Repository
+                </div>
                 <div onclick="showCreateFileDialog()" class="repo-item">
                     Create File
                 </div>
@@ -326,9 +329,6 @@
                 </div>
                 <div onclick="showDeleteFileDialog()" class="repo-item">
                     Delete File
-                </div>
-                <div onclick="showDeleteRepoDialog()" class="repo-item">
-                    Delete Repository
                 </div>
             </div>
         </div>
@@ -383,6 +383,7 @@
         let currentRepo = null;
         let chatHistory = [];
         let pendingDeletion = null;
+        let pendingDeletionType = null; // 'repo' or 'file'
 
         // Tool execution function
         async function executeTool(toolName, args = {}) {
@@ -461,14 +462,6 @@
             chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
         }
 
-        // Delete repo via chat
-        function showDeleteRepoDialog() {
-            const chatInput = document.getElementById('chat-input');
-            chatInput.value = 'Delete the repository ';
-            chatInput.focus();
-            chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
-        }
-
         // Create file via chat
         function showCreateFileDialog() {
             if (!currentRepo) {
@@ -482,13 +475,20 @@
             chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
         }
 
-        // Delete specific repo via chat
-        function deleteRepo(repoName) {
+        // Show delete repo dialog
+        function showDeleteRepoDialog() {
+            if (!currentRepo) {
+                console.log('No repository selected - please select a repository first');
+                return;
+            }
+            
+            // Extract just the repo name from the full name (e.g., "compusophy-bot/test-repo" -> "test-repo")
+            const repoName = currentRepo.split('/').pop();
+            
             const chatInput = document.getElementById('chat-input');
             chatInput.value = `Delete the repository '${repoName}'`;
             chatInput.focus();
             chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
-
         }
 
         // Delete specific file via chat
@@ -571,6 +571,11 @@
 
             // Set current repo
             currentRepo = repoFullName;
+
+            // Clear the current file and reset editor
+            currentFile = null;
+            document.getElementById('editor').value = '';
+            document.getElementById('editor').disabled = true;
 
             // Load files for this repository
             const filesList = document.getElementById('files-list');
@@ -772,53 +777,106 @@
                 input.value = '';
                 
                 if (message.toLowerCase() === 'yes') {
+                    const isFileDelete = pendingDeletionType === 'file';
+                    const itemType = isFileDelete ? 'file' : 'repository';
+                    
                     // Execute the deletion via direct endpoint
                     const loadingMsg = document.createElement('div');
                     loadingMsg.className = 'message assistant';
-                    loadingMsg.innerHTML = '<span class="loading"></span> Deleting repository...';
+                    loadingMsg.innerHTML = `<span class="loading"></span> Deleting ${itemType}...`;
                     loadingMsg.id = 'delete-loading';
                     chatMessages.appendChild(loadingMsg);
                     chatMessages.scrollTop = chatMessages.scrollHeight;
                     
-                    // Call the delete endpoint directly
-                    fetch('/delete', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ repo: pendingDeletion })
-                    })
-                    .then(response => response.json())
-                    .then(result => {
-                        const deleteMsgEl = document.getElementById('delete-loading');
-                        if (deleteMsgEl) deleteMsgEl.remove();
+                    if (isFileDelete) {
+                        // Parse repo and path from pendingDeletion
+                        const [repo, path] = pendingDeletion.split(':::');
                         
-                        const resultMsg = document.createElement('div');
-                        if (result.error) {
-                            resultMsg.className = 'message system';
-                            resultMsg.textContent = ` Error: ${result.error}`;
-                        } else {
-                            resultMsg.className = 'message assistant';
-                            resultMsg.textContent = ` ${result.success}`;
-                        }
-                        chatMessages.appendChild(resultMsg);
-                        chatMessages.scrollTop = chatMessages.scrollHeight;
-                        
-                        // Refresh repo list if visible
-                        if (document.getElementById('repo-list').innerHTML) {
-                            loadRepositories();
-                        }
-                    })
-                    .catch(error => {
-                        const deleteMsgEl = document.getElementById('delete-loading');
-                        if (deleteMsgEl) deleteMsgEl.remove();
-                        
-                        const errorMsg = document.createElement('div');
-                        errorMsg.className = 'message system';
-                        errorMsg.textContent = ` Error: ${error.message}`;
-                        chatMessages.appendChild(errorMsg);
-                        chatMessages.scrollTop = chatMessages.scrollHeight;
-                    });
+                        // Call delete_file via executeTool
+                        fetch('/chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                message: `FORCE_DELETE_FILE:${repo}:${path}`,
+                                history: chatHistory
+                            })
+                        })
+                        .then(response => response.json())
+                        .then(result => {
+                            const deleteMsgEl = document.getElementById('delete-loading');
+                            if (deleteMsgEl) deleteMsgEl.remove();
+                            
+                            const resultMsg = document.createElement('div');
+                            if (result.error) {
+                                resultMsg.className = 'message system';
+                                resultMsg.textContent = ` Error: ${result.error}`;
+                            } else {
+                                resultMsg.className = 'message assistant';
+                                resultMsg.textContent = result.response || ` File deleted successfully`;
+                                
+                                // Refresh file list
+                                if (currentRepo) {
+                                    currentFile = null;
+                                    document.getElementById('editor').value = '';
+                                    document.getElementById('editor').disabled = true;
+                                    setTimeout(() => selectRepository(currentRepo), 500);
+                                }
+                            }
+                            chatMessages.appendChild(resultMsg);
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        })
+                        .catch(error => {
+                            const deleteMsgEl = document.getElementById('delete-loading');
+                            if (deleteMsgEl) deleteMsgEl.remove();
+                            
+                            const errorMsg = document.createElement('div');
+                            errorMsg.className = 'message system';
+                            errorMsg.textContent = ` Error: ${error.message}`;
+                            chatMessages.appendChild(errorMsg);
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        });
+                    } else {
+                        // Call the delete repo endpoint directly
+                        fetch('/delete', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ repo: pendingDeletion })
+                        })
+                        .then(response => response.json())
+                        .then(result => {
+                            const deleteMsgEl = document.getElementById('delete-loading');
+                            if (deleteMsgEl) deleteMsgEl.remove();
+                            
+                            const resultMsg = document.createElement('div');
+                            if (result.error) {
+                                resultMsg.className = 'message system';
+                                resultMsg.textContent = ` Error: ${result.error}`;
+                            } else {
+                                resultMsg.className = 'message assistant';
+                                resultMsg.textContent = ` ${result.success}`;
+                            }
+                            chatMessages.appendChild(resultMsg);
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                            
+                            // Refresh repo list if visible
+                            if (document.getElementById('repo-list').innerHTML) {
+                                loadRepositories();
+                            }
+                        })
+                        .catch(error => {
+                            const deleteMsgEl = document.getElementById('delete-loading');
+                            if (deleteMsgEl) deleteMsgEl.remove();
+                            
+                            const errorMsg = document.createElement('div');
+                            errorMsg.className = 'message system';
+                            errorMsg.textContent = ` Error: ${error.message}`;
+                            chatMessages.appendChild(errorMsg);
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        });
+                    }
                     
                     pendingDeletion = null;
+                    pendingDeletionType = null;
                 } else {
                     // Cancelled
                     const cancelMsg = document.createElement('div');
@@ -827,6 +885,7 @@
                     chatMessages.appendChild(cancelMsg);
                     chatMessages.scrollTop = chatMessages.scrollHeight;
                     pendingDeletion = null;
+                    pendingDeletionType = null;
                 }
                 
                 return;
@@ -890,6 +949,7 @@
                         assistantMsg.style.borderLeft = '3px solid #ff9800';
                         assistantMsg.style.fontWeight = '600';
                         pendingDeletion = response.pendingDeletion;
+                        pendingDeletionType = response.deletionType || 'repo';
                     }
                     
                     assistantMsg.textContent = response.response;
@@ -932,6 +992,17 @@
                                         selectRepository(currentRepo);
                                         // Load the newly created file in the editor
                                         setTimeout(() => loadFile(tc.args.path), 1000);
+                                    }
+                                }
+                                // Refresh file list after deleting a file
+                                else if (tc.name === 'delete_file') {
+                                    if (currentRepo) {
+                                        // Clear the editor
+                                        currentFile = null;
+                                        document.getElementById('editor').value = '';
+                                        document.getElementById('editor').disabled = true;
+                                        // Refresh the files list
+                                        setTimeout(() => selectRepository(currentRepo), 500);
                                     }
                                 }
                             }
