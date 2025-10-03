@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GitHub AI Agent</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #ffffff;
+            color: #212529;
+            min-height: 100vh;
+            padding: 24px;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 240px 280px 1fr;
+            gap: 24px;
+            height: calc(100vh - 48px);
+        }
+
+        .sidebar, .repo-sidebar {
+            background: #fafbfc;
+            border: 1px solid #e1e5e9;
+            border-radius: 8px;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .main-panel {
+            display: grid;
+            grid-template-rows: 1fr 420px;
+            gap: 32px;
+        }
+
+        .editor-section, .chat-section {
+            background: #ffffff;
+            border: 1px solid #e1e5e9;
+            border-radius: 8px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        h2 {
+            font-size: 16px;
+            margin-bottom: 12px;
+            color: #212529;
+            font-weight: 600;
+            border-bottom: 1px solid #e1e5e9;
+            padding-bottom: 6px;
+        }
+
+        h3 {
+            font-size: 14px;
+            margin-bottom: 12px;
+            color: #6c757d;
+            font-weight: 500;
+        }
+
+        .file-tree {
+            margin-top: 12px;
+        }
+
+        .file-item, .dir-item, .repo-item {
+            padding: 10px 12px;
+            margin: 2px 0;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            font-size: 14px;
+            border-left: 3px solid transparent;
+        }
+
+        .file-item:hover, .dir-item:hover, .repo-item:hover {
+            background: #f8f9fa;
+            border-left-color: #007bff;
+        }
+
+        .file-item {
+            color: #495057;
+        }
+
+        .dir-item {
+            color: #007bff;
+            font-weight: 500;
+        }
+
+        .repo-item {
+            color: #212529;
+            font-weight: 500;
+        }
+
+        .repo-item.expanded {
+            background: #e9ecef;
+        }
+
+        .repo-files {
+            margin-left: 20px;
+            margin-top: 4px;
+            margin-bottom: 8px;
+        }
+
+        .repo-files .file-item {
+            font-size: 13px;
+            padding: 8px 10px;
+        }
+
+        button {
+            background: #007bff;
+            color: #ffffff;
+            border: 1px solid #007bff;
+            padding: 10px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 14px;
+            transition: all 0.15s ease;
+            margin-bottom: 8px;
+        }
+
+        button:hover {
+            background: #0056b3;
+            border-color: #0056b3;
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        #editor {
+            flex: 1;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 16px;
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Consolas', monospace;
+            font-size: 13px;
+            color: #212529;
+            resize: none;
+            line-height: 1.5;
+            overflow-y: auto;
+        }
+
+        #editor:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+
+        .editor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .editor-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .editor-actions button {
+            width: auto;
+            margin: 0;
+            padding: 8px 16px;
+            font-size: 12px;
+        }
+
+        .tools-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .tool-btn {
+            background: #f8f9fa;
+            color: #495057;
+            border: 1px solid #dee2e6;
+            padding: 10px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.15s ease;
+            text-align: left;
+        }
+
+        .tool-btn:hover {
+            background: #e9ecef;
+            border-color: #adb5bd;
+            color: #212529;
+        }
+
+        .info-section {
+            margin-bottom: 20px;
+        }
+
+        .info-btn {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
+            color: #fff;
+            border: 1px solid #ff6b6b;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            width: 100%;
+            transition: all 0.2s;
+        }
+
+        .info-btn:hover {
+            background: linear-gradient(135deg, #ff5252 0%, #e53935 100%);
+            transform: translateY(-1px);
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .message {
+            padding: 12px 16px;
+            border-radius: 6px;
+            max-width: 85%;
+            line-height: 1.5;
+            font-size: 14px;
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: #007bff;
+            color: #ffffff;
+            font-weight: 500;
+        }
+
+        .message.assistant {
+            align-self: flex-start;
+            background: #f8f9fa;
+            color: #212529;
+            border: 1px solid #e9ecef;
+            border-left: 3px solid #007bff;
+        }
+
+        .message.system {
+            align-self: center;
+            background: #fff3cd;
+            color: #856404;
+            font-size: 13px;
+            border: 1px solid #ffeaa7;
+            border-radius: 4px;
+        }
+
+        .tool-call {
+            font-size: 12px;
+            color: #007bff;
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 3px solid #007bff;
+            font-family: 'SF Mono', 'Monaco', monospace;
+        }
+
+        .chat-input-area {
+            display: flex;
+            gap: 12px;
+        }
+
+        #chat-input {
+            flex: 1;
+            background: #ffffff;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            padding: 12px 16px;
+            color: #495057;
+            font-size: 14px;
+            font-family: inherit;
+            transition: border-color 0.15s ease;
+        }
+
+        #chat-input:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+
+        #chat-form button {
+            width: auto;
+            margin: 0;
+        }
+
+        .status {
+            margin-top: 12px;
+            padding: 12px 16px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .empty-state {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+            font-style: normal;
+            padding: 40px 20px;
+            text-align: center;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #dee2e6;
+            border-top-color: #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f3f4;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #c1c8cd;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a8b1b8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Tools Sidebar -->
+        <div class="sidebar">
+            <h2>Tools</h2>
+            <div class="tools-buttons">
+                <button onclick="loadRepositories()" class="tool-btn">
+                    List Repositories
+                </button>
+                <button onclick="showCreateRepoDialog()" class="tool-btn">
+                    Create Repository
+                </button>
+                <button onclick="showDeleteRepoDialog()" class="tool-btn">
+                    Delete Repository
+                </button>
+            </div>
+        </div>
+
+        <!-- Repositories & Files Sidebar -->
+        <div class="repo-sidebar">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h2 style="margin-bottom: 0;">Repositories</h2>
+                <button onclick="showCreateRepoDialog()" style="background: #28a745; border-color: #28a745; padding: 6px 12px; font-size: 12px; margin: 0;">
+                    + New Repo
+                </button>
+            </div>
+            <div id="repo-list" class="file-tree">
+                <div class="empty-state"><span class="loading"></span> Loading repositories...</div>
+            </div>
+        </div>
+
+        <!-- Main Panel -->
+        <div class="main-panel">
+            <!-- Editor Section -->
+            <div class="editor-section">
+                <div class="editor-header">
+                    <div>
+                        <h2 id="file-path">No file selected</h2>
+                        <h3 id="file-info">Select a file from the sidebar</h3>
+                    </div>
+                    <div class="editor-actions">
+                        <button id="save-btn" 
+                                onclick="saveFile()" 
+                                style="display:none;">
+                            Save
+                        </button>
+                    </div>
+                </div>
+                <textarea id="editor" placeholder="Select a file to edit..." disabled></textarea>
+            </div>
+
+            <!-- Chat Section -->
+            <div class="chat-section">
+                <div class="chat-messages" id="chat-messages">
+                </div>
+                <form id="chat-form" hx-post="/chat" 
+                      hx-target="#chat-messages" 
+                      hx-swap="beforeend"
+                      hx-on::before-request="handleChatSubmit(event)"
+                      hx-on::after-request="handleChatResponse(event)">
+                    <div class="chat-input-area">
+                        <input type="text" 
+                               id="chat-input" 
+                               name="message" 
+                               placeholder="Ask me anything..." 
+                               autocomplete="off"
+                               required>
+                        <button type="submit">Send</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentFile = null;
+        let currentRepo = null;
+        let chatHistory = [];
+        let pendingDeletion = null;
+
+        // Tool execution function
+        async function executeTool(toolName, args = {}) {
+            try {
+                // Add loading message to chat
+                const chatMessages = document.getElementById('chat-messages');
+                const loadingMsg = document.createElement('div');
+                loadingMsg.className = 'message assistant';
+                loadingMsg.innerHTML = '<span class="loading"></span> Executing tool...';
+                loadingMsg.id = 'tool-loading';
+                chatMessages.appendChild(loadingMsg);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: `Execute ${toolName} with args: ${JSON.stringify(args)}`,
+                        history: chatHistory
+                    })
+                });
+
+                const result = await response.json();
+
+                // Remove loading message
+                const loadingMsgEl = document.getElementById('tool-loading');
+                if (loadingMsgEl) loadingMsgEl.remove();
+
+                if (result.error) {
+                    const errorMsg = document.createElement('div');
+                    errorMsg.className = 'message system';
+                    errorMsg.textContent = `Error: ${result.error}`;
+                    chatMessages.appendChild(errorMsg);
+                } else {
+                    const assistantMsg = document.createElement('div');
+                    assistantMsg.className = 'message assistant';
+                    assistantMsg.textContent = result.response;
+
+                    if (result.toolCalls && result.toolCalls.length > 0) {
+                        let toolHtml = '';
+                        result.toolCalls.forEach(tc => {
+                            toolHtml += `<div class="tool-call">${tc.name}(${JSON.stringify(tc.args)})</div>`;
+                        });
+                        assistantMsg.innerHTML += toolHtml;
+                    }
+
+                    chatMessages.appendChild(assistantMsg);
+
+                    // Add to history
+                    chatHistory.push({
+                        role: 'model',
+                        parts: [{ text: result.response }]
+                    });
+                }
+
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            } catch (error) {
+                const chatMessages = document.getElementById('chat-messages');
+                const loadingMsgEl = document.getElementById('tool-loading');
+                if (loadingMsgEl) loadingMsgEl.remove();
+
+                const errorMsg = document.createElement('div');
+                errorMsg.className = 'message system';
+                errorMsg.textContent = `Error: ${error.message}`;
+                chatMessages.appendChild(errorMsg);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        }
+
+        // Create repo via chat
+        function showCreateRepoDialog() {
+            const chatInput = document.getElementById('chat-input');
+            chatInput.value = 'Create a new repository called ';
+            chatInput.focus();
+            chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
+        }
+
+        // Delete repo via chat
+        function showDeleteRepoDialog() {
+            const chatInput = document.getElementById('chat-input');
+            chatInput.value = 'Delete the repository ';
+            chatInput.focus();
+            chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
+        }
+
+        // Load repositories
+        async function loadRepositories() {
+            const repoList = document.getElementById('repo-list');
+            
+            // Show loading state
+            repoList.innerHTML = '<div class="empty-state"><span class="loading"></span> Loading...</div>';
+            
+            try {
+                const response = await fetch('/repos');
+                const data = await response.json();
+                
+                if (data.error) {
+                    repoList.innerHTML = `<div class="status error">${data.error}</div>`;
+                } else if (data.repos) {
+                    renderRepoList(data.repos);
+                } else {
+                    repoList.innerHTML = '<div class="empty-state">No repositories found</div>';
+                }
+            } catch (error) {
+                repoList.innerHTML = `<div class="status error">Error: ${error.message}</div>`;
+            }
+        }
+
+        function renderRepoList(repos) {
+            const repoList = document.getElementById('repo-list');
+            if (repos.length === 0) {
+                repoList.innerHTML = '<div class="empty-state">No repositories found</div>';
+                return;
+            }
+
+            let html = '';
+            repos.forEach(repo => {
+                const icon = repo.private ? '🔒' : '';
+                const desc = repo.description ? `<br><small style="color: #666; font-size: 11px;">${repo.description}</small>` : '';
+                const repoId = repo.fullName.replace('/', '-');
+                html += `
+                    <div>
+                        <div class="repo-item" 
+                             hx-get="/files?repo=${encodeURIComponent(repo.fullName)}" 
+                             hx-target="#files-${repoId}"
+                             hx-swap="innerHTML"
+                             hx-trigger="click once"
+                             onclick="toggleRepo('${repoId}', '${repo.fullName}')">
+                            ${icon}${icon ? ' ' : ''}${repo.name}${desc}
+                        </div>
+                        <div id="files-${repoId}" class="repo-files" style="display: none;"></div>
+                    </div>
+                `;
+            });
+            repoList.innerHTML = html;
+            htmx.process(repoList);
+        }
+
+        function toggleRepo(repoId, repoFullName) {
+            const filesDiv = document.getElementById(`files-${repoId}`);
+            const repoItem = filesDiv.previousElementSibling;
+            
+            // Set current repo
+            currentRepo = repoFullName;
+            
+            // Toggle visibility
+            if (filesDiv.style.display === 'none') {
+                filesDiv.style.display = 'block';
+                repoItem.classList.add('expanded');
+            } else {
+                filesDiv.style.display = 'none';
+                repoItem.classList.remove('expanded');
+            }
+        }
+
+        // Listen for htmx afterSwap to render files as HTML
+        htmx.on('htmx:afterSwap', function(event) {
+            if (event.detail.target.classList.contains('repo-files')) {
+                try {
+                    const response = JSON.parse(event.detail.xhr.responseText);
+                    if (response.files) {
+                        let html = `
+                            <div class="file-item" onclick="createNewFile()" style="color: #28a745; font-weight: 500;">
+                                + New file
+                            </div>
+                        `;
+                        response.files.forEach(file => {
+                            if (file.type === 'file') {
+                                html += `
+                                    <div class="file-item" onclick="loadFile('${file.path}')">
+                                        ${file.name}
+                                    </div>
+                                `;
+                            } else if (file.type === 'dir') {
+                                html += `
+                                    <div class="dir-item">
+                                        ${file.name}/
+                                    </div>
+                                `;
+                            }
+                        });
+                        event.detail.target.innerHTML = html;
+                    } else if (response.error) {
+                        event.detail.target.innerHTML = `<div class="status error">${response.error}</div>`;
+                    }
+                } catch (e) {
+                    console.error('Failed to parse files response:', e);
+                }
+            }
+        });
+
+        // Create new file in current repo
+        function createNewFile() {
+            if (!currentRepo) {
+                document.getElementById('file-info').textContent = 'Please select a repository first';
+                return;
+            }
+
+            const chatInput = document.getElementById('chat-input');
+            chatInput.value = `Create a new file called `;
+            chatInput.focus();
+            chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
+        }
+
+        async function loadFile(filePath) {
+            if (!currentRepo) {
+                document.getElementById('file-info').textContent = 'Please select a repository first';
+                return;
+            }
+
+            document.getElementById('file-info').innerHTML = '<span class="loading"></span> Loading file...';
+
+            try {
+                const response = await fetch(`/file?repo=${encodeURIComponent(currentRepo)}&path=${encodeURIComponent(filePath)}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    document.getElementById('file-info').textContent = `Error: ${data.error}`;
+                    return;
+                }
+
+                currentFile = {
+                    repo: currentRepo,
+                    path: filePath,
+                    content: data.content,
+                    sha: data.sha
+                };
+
+                document.getElementById('file-path').textContent = `${currentRepo}/${filePath}`;
+                document.getElementById('file-info').textContent = `SHA: ${data.sha.substring(0, 7)}...`;
+                document.getElementById('editor').value = data.content;
+                document.getElementById('editor').disabled = false;
+                document.getElementById('save-btn').style.display = 'block';
+
+            } catch (error) {
+                document.getElementById('file-info').textContent = ` Error: ${error.message}`;
+            }
+        }
+
+        let pendingCommit = false;
+
+        async function saveFile() {
+            if (!currentFile) return;
+
+            const content = document.getElementById('editor').value;
+            const defaultMessage = `Update ${currentFile.path}`;
+            
+            // Send to chat as AI command
+            const chatMessages = document.getElementById('chat-messages');
+            const chatInput = document.getElementById('chat-input');
+            
+            // Show in chat what we're doing
+            const userMsg = document.createElement('div');
+            userMsg.className = 'message user';
+            userMsg.textContent = `Save file ${currentFile.path}`;
+            chatMessages.appendChild(userMsg);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            const loadingMsg = document.createElement('div');
+            loadingMsg.className = 'message assistant';
+            loadingMsg.innerHTML = '<span class="loading"></span> Saving file...';
+            loadingMsg.id = 'save-loading';
+            chatMessages.appendChild(loadingMsg);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            try {
+                const response = await fetch('/commit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        repo: currentFile.repo,
+                        content: content,
+                        filePath: currentFile.path,
+                        message: defaultMessage
+                    })
+                });
+
+                const result = await response.json();
+
+                const saveMsgEl = document.getElementById('save-loading');
+                if (saveMsgEl) saveMsgEl.remove();
+
+                const resultMsg = document.createElement('div');
+                if (result.error) {
+                    resultMsg.className = 'message system';
+                    resultMsg.textContent = ` Error: ${result.error}`;
+                    document.getElementById('file-info').textContent = ` Save failed: ${result.error}`;
+                } else {
+                    resultMsg.className = 'message assistant';
+                    resultMsg.textContent = ` File saved successfully!`;
+                    document.getElementById('file-info').textContent = ' Saved successfully';
+                    // Reload the file to get new SHA
+                    setTimeout(() => loadFile(currentFile.path), 500);
+                }
+                chatMessages.appendChild(resultMsg);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            } catch (error) {
+                const saveMsgEl = document.getElementById('save-loading');
+                if (saveMsgEl) saveMsgEl.remove();
+
+                const errorMsg = document.createElement('div');
+                errorMsg.className = 'message system';
+                errorMsg.textContent = ` Error: ${error.message}`;
+                chatMessages.appendChild(errorMsg);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+                document.getElementById('file-info').textContent = ` Error: ${error.message}`;
+            }
+        }
+
+        function handleChatSubmit(event) {
+            const input = document.getElementById('chat-input');
+            const message = input.value.trim();
+            
+            if (!message) {
+                event.preventDefault();
+                return;
+            }
+
+            // Check if we're waiting for deletion confirmation
+            if (pendingDeletion) {
+                event.preventDefault();
+                
+                const chatMessages = document.getElementById('chat-messages');
+                
+                // Add user message to chat
+                const userMsg = document.createElement('div');
+                userMsg.className = 'message user';
+                userMsg.textContent = message;
+                chatMessages.appendChild(userMsg);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+                
+                // Clear input
+                input.value = '';
+                
+                if (message.toLowerCase() === 'yes') {
+                    // Execute the deletion via direct endpoint
+                    const loadingMsg = document.createElement('div');
+                    loadingMsg.className = 'message assistant';
+                    loadingMsg.innerHTML = '<span class="loading"></span> Deleting repository...';
+                    loadingMsg.id = 'delete-loading';
+                    chatMessages.appendChild(loadingMsg);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                    
+                    // Call the delete endpoint directly
+                    fetch('/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ repo: pendingDeletion })
+                    })
+                    .then(response => response.json())
+                    .then(result => {
+                        const deleteMsgEl = document.getElementById('delete-loading');
+                        if (deleteMsgEl) deleteMsgEl.remove();
+                        
+                        const resultMsg = document.createElement('div');
+                        if (result.error) {
+                            resultMsg.className = 'message system';
+                            resultMsg.textContent = ` Error: ${result.error}`;
+                        } else {
+                            resultMsg.className = 'message assistant';
+                            resultMsg.textContent = ` ${result.success}`;
+                        }
+                        chatMessages.appendChild(resultMsg);
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                        
+                        // Refresh repo list if visible
+                        if (document.getElementById('repo-list').innerHTML) {
+                            loadRepositories();
+                        }
+                    })
+                    .catch(error => {
+                        const deleteMsgEl = document.getElementById('delete-loading');
+                        if (deleteMsgEl) deleteMsgEl.remove();
+                        
+                        const errorMsg = document.createElement('div');
+                        errorMsg.className = 'message system';
+                        errorMsg.textContent = ` Error: ${error.message}`;
+                        chatMessages.appendChild(errorMsg);
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                    });
+                    
+                    pendingDeletion = null;
+                } else {
+                    // Cancelled
+                    const cancelMsg = document.createElement('div');
+                    cancelMsg.className = 'message system';
+                    cancelMsg.textContent = ' Deletion cancelled';
+                    chatMessages.appendChild(cancelMsg);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                    pendingDeletion = null;
+                }
+                
+                return;
+            }
+
+            // Normal message flow
+            // Add user message to chat
+            const chatMessages = document.getElementById('chat-messages');
+            const userMsg = document.createElement('div');
+            userMsg.className = 'message user';
+            userMsg.textContent = message;
+            chatMessages.appendChild(userMsg);
+            
+            // Add to history
+            chatHistory.push({
+                role: 'user',
+                parts: [{ text: message }]
+            });
+
+            // Scroll to bottom
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            // Clear input
+            input.value = '';
+
+            // Add loading message
+            const loadingMsg = document.createElement('div');
+            loadingMsg.className = 'message assistant';
+            loadingMsg.innerHTML = '<span class="loading"></span> Thinking...';
+            loadingMsg.id = 'loading-msg';
+            chatMessages.appendChild(loadingMsg);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function handleChatResponse(event) {
+            const chatMessages = document.getElementById('chat-messages');
+            
+            // Remove loading message
+            const loadingMsg = document.getElementById('loading-msg');
+            if (loadingMsg) {
+                loadingMsg.remove();
+            }
+
+            if (event.detail.successful) {
+                const response = JSON.parse(event.detail.xhr.response);
+
+                if (response.error) {
+                    const errorMsg = document.createElement('div');
+                    errorMsg.className = 'message system';
+                    errorMsg.textContent = `Error: ${response.error}`;
+                    chatMessages.appendChild(errorMsg);
+                } else if (response.response) {
+                    const assistantMsg = document.createElement('div');
+                    assistantMsg.className = 'message assistant';
+                    
+                    // Check if this is a deletion confirmation request
+                    if (response.pendingDeletion) {
+                        assistantMsg.style.background = '#fff3cd';
+                        assistantMsg.style.color = '#856404';
+                        assistantMsg.style.borderLeft = '3px solid #ff9800';
+                        assistantMsg.style.fontWeight = '600';
+                        pendingDeletion = response.pendingDeletion;
+                    }
+                    
+                    assistantMsg.textContent = response.response;
+
+                    // Show tool calls if any
+                    if (response.toolCalls && response.toolCalls.length > 0) {
+                        let toolHtml = '';
+                        response.toolCalls.forEach(tc => {
+                            toolHtml += `<div class="tool-call">${tc.name}(${JSON.stringify(tc.args)})</div>`;
+                        });
+                        assistantMsg.innerHTML += toolHtml;
+                    }
+
+                    chatMessages.appendChild(assistantMsg);
+
+                    // Add to history (unless it's a pending deletion)
+                    if (!response.pendingDeletion) {
+                        chatHistory.push({
+                            role: 'model',
+                            parts: [{ text: response.response }]
+                        });
+                    }
+                }
+            } else {
+                const errorMsg = document.createElement('div');
+                errorMsg.className = 'message system';
+                errorMsg.textContent = 'Failed to get response from AI';
+                chatMessages.appendChild(errorMsg);
+            }
+
+            // Scroll to bottom
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            // Prevent htmx from doing its own swap
+            event.preventDefault();
+        }
+
+        // Update chat form to include history and context
+        htmx.on('#chat-form', 'htmx:configRequest', function(event) {
+            event.detail.parameters.history = JSON.stringify(chatHistory);
+            
+            // Add context about current state
+            const context = {
+                currentRepo: currentRepo,
+                currentFile: currentFile ? {
+                    repo: currentFile.repo,
+                    path: currentFile.path,
+                    content: document.getElementById('editor').value
+                } : null
+            };
+            event.detail.parameters.context = JSON.stringify(context);
+        });
+
+        // Auto-load repositories on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            loadRepositories();
+        });
+    </script>
+</body>
+</html>
+
