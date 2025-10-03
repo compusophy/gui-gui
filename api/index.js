@@ -622,9 +622,11 @@ When ready to act, output ONLY the function call. NO explanations, NO code block
                 // Check if the text response contains function call syntax
                 const functionCallMatch = cleanedText.match(/(\w+)\s*\(\s*([^)]*)\s*\)/);
 
+                let functionName = null;
+                let args = {};
+
                 if (functionCallMatch) {
-                    const functionName = functionCallMatch[1];
-                    let args = {};
+                    functionName = functionCallMatch[1];
 
                     // Parse arguments - handle both single and double quotes
                     const argsString = functionCallMatch[2];
@@ -642,8 +644,78 @@ When ready to act, output ONLY the function call. NO explanations, NO code block
                             });
                         }
                     }
+                } else {
+                    // Handle natural language input for specific functions
+                    if (cleanedText.includes("Delete the repository")) {
+                        functionName = 'delete_repo';
+                        // Extract repository name from quotes
+                        const repoMatch = cleanedText.match(/Delete the repository ['"](.+?)['"]/);
+                        if (repoMatch) {
+                            args.repo = `${githubUsername}/${repoMatch[1]}`;
+                        }
+                    } else if (cleanedText.includes("Create a new repository called")) {
+                        functionName = 'create_repo';
+                        // Extract repository name from quotes
+                        const repoMatch = cleanedText.match(/Create a new repository called ['"](.+?)['"]/);
+                        if (repoMatch) {
+                            args.name = repoMatch[1];
+                        }
+                    } else if (cleanedText.includes("Create a new file called")) {
+                        functionName = 'update_file';
+                        // Extract filename from quotes
+                        const fileMatch = cleanedText.match(/Create a new file called ['"](.+?)['"]/);
+                        if (fileMatch) {
+                            args.path = fileMatch[1];
+                            args.content = `# ${fileMatch[1]}\n\nCreated by GitHub AI Agent\n\nAdd your content here...`;
+                            args.message = `Create ${fileMatch[1]}`;
+                        }
+                    }
+                }
 
+                if (functionName) {
                     console.log('Parsed function:', functionName, 'with args:', args);
+
+                    // Use context to fill in missing arguments
+                    if (context) {
+                        try {
+                            const ctx = JSON.parse(context);
+                            if (ctx.currentRepo && !args.repo) {
+                                // For file operations, use the current repository context
+                                if (functionName === 'update_file' || functionName === 'read_file' || functionName === 'list_files') {
+                                    args.repo = ctx.currentRepo;
+                                    console.log('Using context repo:', args.repo);
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Failed to parse context for args:', e);
+                        }
+                    }
+
+                    // Validate required arguments
+                    if (functionName === 'delete_repo' && !args.repo) {
+                        responseText = `❌ Please specify a repository to delete. Example: "Delete the repository 'repository-name'"`;
+                        return res.json({
+                            response: responseText
+                        });
+                    } else if (functionName === 'create_repo' && !args.name) {
+                        responseText = `❌ Please specify a repository name. Example: "Create a new repository called 'my-repo'"`;
+                        return res.json({
+                            response: responseText
+                        });
+                    } else if (functionName === 'update_file' && (!args.path || !args.content)) {
+                        responseText = `❌ Please specify a filename and content. Example: "Create a new file called 'myfile.txt'"`;
+                        return res.json({
+                            response: responseText
+                        });
+                    }
+
+                    // For file operations, we need a current repository context
+                    if ((functionName === 'update_file' || functionName === 'read_file' || functionName === 'list_files') && !args.repo) {
+                        responseText = `❌ Please select a repository first, or specify it in your request.`;
+                        return res.json({
+                            response: responseText
+                        });
+                    }
 
                     // Check if this is a destructive operation
                     if (functionName === 'delete_repo') {

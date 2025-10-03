@@ -17,51 +17,38 @@
             background: #ffffff;
             color: #212529;
             min-height: 100vh;
-            padding: 24px;
+            padding: 24px 24px;
             line-height: 1.6;
         }
 
         .container {
-            max-width: 1800px;
-            margin: 0 auto;
+            max-width: 100%;
+            margin: 0;
             display: grid;
-            grid-template-columns: 240px 280px 1fr;
+            grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
             gap: 24px;
             height: calc(100vh - 48px);
         }
 
-        .sidebar, .repo-sidebar {
+        .sidebar, .repo-sidebar, .files-sidebar, .editor-panel, .chat-panel {
             background: #fafbfc;
             border: 1px solid #e1e5e9;
             border-radius: 8px;
-            padding: 20px;
+            padding: 24px;
             overflow-y: auto;
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-
-        .main-panel {
-            display: grid;
-            grid-template-rows: 1fr 420px;
-            gap: 32px;
-        }
-
-        .editor-section, .chat-section {
-            background: #ffffff;
-            border: 1px solid #e1e5e9;
-            border-radius: 8px;
-            padding: 24px;
             display: flex;
             flex-direction: column;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         }
+
 
         h2 {
             font-size: 16px;
-            margin-bottom: 12px;
+            margin: 0 0 20px 0;
             color: #212529;
             font-weight: 600;
             border-bottom: 1px solid #e1e5e9;
-            padding-bottom: 6px;
+            padding-bottom: 20px;
         }
 
         h3 {
@@ -72,7 +59,7 @@
         }
 
         .file-tree {
-            margin-top: 12px;
+            margin-top: 0;
         }
 
         .file-item, .dir-item, .repo-item {
@@ -80,18 +67,20 @@
             margin: 2px 0;
             border-radius: 4px;
             cursor: pointer;
-            transition: all 0.15s ease;
+            transition: background 0.15s ease;
             font-size: 14px;
-            border-left: 3px solid transparent;
         }
 
         .file-item:hover, .dir-item:hover, .repo-item:hover {
             background: #f8f9fa;
-            border-left-color: #007bff;
         }
 
         .file-item {
             color: #495057;
+        }
+
+        .file-item.active {
+            background: #e9ecef;
         }
 
         .dir-item {
@@ -162,29 +151,14 @@
             box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
         }
 
-        .editor-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
 
-        .editor-actions {
-            display: flex;
-            gap: 10px;
-        }
 
-        .editor-actions button {
-            width: auto;
-            margin: 0;
-            padding: 8px 16px;
-            font-size: 12px;
-        }
 
         .tools-buttons {
             display: flex;
             flex-direction: column;
             gap: 8px;
+            margin-top: 0;
         }
 
         .tool-btn {
@@ -383,65 +357,63 @@
                 <button onclick="showCreateRepoDialog()" class="tool-btn">
                     Create Repository
                 </button>
+                <button onclick="showCreateFileDialog()" class="tool-btn">
+                    Create File
+                </button>
+                <button onclick="saveFile()" class="tool-btn">
+                    Save File
+                </button>
+                <button onclick="showDeleteFileDialog()" class="tool-btn">
+                    Delete File
+                </button>
                 <button onclick="showDeleteRepoDialog()" class="tool-btn">
                     Delete Repository
                 </button>
             </div>
         </div>
 
-        <!-- Repositories & Files Sidebar -->
+        <!-- Repositories Sidebar -->
         <div class="repo-sidebar">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <h2 style="margin-bottom: 0;">Repositories</h2>
-                <button onclick="showCreateRepoDialog()" style="background: #28a745; border-color: #28a745; padding: 6px 12px; font-size: 12px; margin: 0;">
-                    + New Repo
-                </button>
-            </div>
+            <h2>Repositories</h2>
             <div id="repo-list" class="file-tree">
                 <div class="empty-state"><span class="loading"></span> Loading repositories...</div>
             </div>
         </div>
 
-        <!-- Main Panel -->
-        <div class="main-panel">
-            <!-- Editor Section -->
-            <div class="editor-section">
-                <div class="editor-header">
-                    <div>
-                        <h2 id="file-path">No file selected</h2>
-                        <h3 id="file-info">Select a file from the sidebar</h3>
-                    </div>
-                    <div class="editor-actions">
-                        <button id="save-btn" 
-                                onclick="saveFile()" 
-                                style="display:none;">
-                            Save
-                        </button>
-                    </div>
-                </div>
-                <textarea id="editor" placeholder="Select a file to edit..." disabled></textarea>
+        <!-- Files Sidebar -->
+        <div class="files-sidebar">
+            <h2>Files</h2>
+            <div id="files-list" class="file-tree">
+                <div class="empty-state">Select a repository to view files</div>
             </div>
+        </div>
 
-            <!-- Chat Section -->
-            <div class="chat-section">
-                <div class="chat-messages" id="chat-messages">
-                </div>
-                <form id="chat-form" hx-post="/chat" 
-                      hx-target="#chat-messages" 
-                      hx-swap="beforeend"
-                      hx-on::before-request="handleChatSubmit(event)"
-                      hx-on::after-request="handleChatResponse(event)">
-                    <div class="chat-input-area">
-                        <input type="text" 
-                               id="chat-input" 
-                               name="message" 
-                               placeholder="Ask me anything..." 
-                               autocomplete="off"
-                               required>
-                        <button type="submit">Send</button>
-                    </div>
-                </form>
+        <!-- Editor Panel -->
+        <div class="editor-panel">
+            <h2>Editor</h2>
+            <textarea id="editor" placeholder="Select a file to edit..." disabled style="flex: 1;"></textarea>
+        </div>
+
+        <!-- Chat Panel -->
+        <div class="chat-panel">
+            <h2>Chat</h2>
+            <div class="chat-messages" id="chat-messages" style="flex: 1; margin-bottom: 16px;">
             </div>
+            <form id="chat-form" hx-post="/chat" 
+                  hx-target="#chat-messages" 
+                  hx-swap="beforeend"
+                  hx-on::before-request="handleChatSubmit(event)"
+                  hx-on::after-request="handleChatResponse(event)">
+                <div class="chat-input-area">
+                    <input type="text" 
+                           id="chat-input" 
+                           name="message" 
+                           placeholder="Ask me anything..." 
+                           autocomplete="off"
+                           required>
+                    <button type="submit">Send</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -536,6 +508,50 @@
             chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
         }
 
+        // Create file via chat
+        function showCreateFileDialog() {
+            if (!currentRepo) {
+                console.log('No repository selected');
+                return;
+            }
+
+            const chatInput = document.getElementById('chat-input');
+            chatInput.value = `Create a new file called `;
+            chatInput.focus();
+            chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
+        }
+
+        // Delete specific repo via chat
+        function deleteRepo(repoName) {
+            const chatInput = document.getElementById('chat-input');
+            chatInput.value = `Delete the repository '${repoName}'`;
+            chatInput.focus();
+            chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
+
+        }
+
+        // Delete specific file via chat
+        function deleteFile(filePath) {
+            const chatInput = document.getElementById('chat-input');
+            chatInput.value = `Delete the file '${filePath}'`;
+            chatInput.focus();
+            chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
+
+        }
+
+        // Show delete file dialog
+        function showDeleteFileDialog() {
+            if (!currentFile) {
+                console.log('No file selected');
+                return;
+            }
+
+            const chatInput = document.getElementById('chat-input');
+            chatInput.value = `Delete the file '${currentFile.path}'`;
+            chatInput.focus();
+            chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
+        }
+
         // Load repositories
         async function loadRepositories() {
             const repoList = document.getElementById('repo-list');
@@ -569,19 +585,10 @@
             let html = '';
             repos.forEach(repo => {
                 const icon = repo.private ? '🔒' : '';
-                const desc = repo.description ? `<br><small style="color: #666; font-size: 11px;">${repo.description}</small>` : '';
                 const repoId = repo.fullName.replace('/', '-');
                 html += `
-                    <div>
-                        <div class="repo-item" 
-                             hx-get="/files?repo=${encodeURIComponent(repo.fullName)}" 
-                             hx-target="#files-${repoId}"
-                             hx-swap="innerHTML"
-                             hx-trigger="click once"
-                             onclick="toggleRepo('${repoId}', '${repo.fullName}')">
-                            ${icon}${icon ? ' ' : ''}${repo.name}${desc}
-                        </div>
-                        <div id="files-${repoId}" class="repo-files" style="display: none;"></div>
+                    <div class="repo-item" data-repo-name="${repo.fullName}" onclick="selectRepository('${repo.fullName}')">
+                        ${icon}${icon ? ' ' : ''}${repo.name}
                     </div>
                 `;
             });
@@ -589,86 +596,98 @@
             htmx.process(repoList);
         }
 
-        function toggleRepo(repoId, repoFullName) {
-            const filesDiv = document.getElementById(`files-${repoId}`);
-            const repoItem = filesDiv.previousElementSibling;
-            
+        async function selectRepository(repoFullName) {
+            // Remove active class from all repos
+            document.querySelectorAll('.repo-item').forEach(item => {
+                item.classList.remove('expanded');
+            });
+
+            // Add active class to selected repo
+            const selectedRepo = document.querySelector(`.repo-item[data-repo-name="${repoFullName}"]`);
+            if (selectedRepo) {
+                selectedRepo.classList.add('expanded');
+            }
+
             // Set current repo
             currentRepo = repoFullName;
-            
-            // Toggle visibility
-            if (filesDiv.style.display === 'none') {
-                filesDiv.style.display = 'block';
-                repoItem.classList.add('expanded');
-            } else {
-                filesDiv.style.display = 'none';
-                repoItem.classList.remove('expanded');
+
+            // Load files for this repository
+            const filesList = document.getElementById('files-list');
+            filesList.innerHTML = '<div class="empty-state"><span class="loading"></span> Loading files...</div>';
+
+            try {
+                const response = await fetch(`/files?repo=${encodeURIComponent(repoFullName)}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    filesList.innerHTML = `<div class="status error">${data.error}</div>`;
+                } else if (data.files) {
+                    renderFilesList(data.files);
+                } else {
+                    filesList.innerHTML = '<div class="empty-state">No files found</div>';
+                }
+            } catch (error) {
+                filesList.innerHTML = `<div class="status error">Error: ${error.message}</div>`;
             }
         }
 
-        // Listen for htmx afterSwap to render files as HTML
-        htmx.on('htmx:afterSwap', function(event) {
-            if (event.detail.target.classList.contains('repo-files')) {
-                try {
-                    const response = JSON.parse(event.detail.xhr.responseText);
-                    if (response.files) {
-                        let html = `
-                            <div class="file-item" onclick="createNewFile()" style="color: #28a745; font-weight: 500;">
-                                + New file
-                            </div>
-                        `;
-                        response.files.forEach(file => {
-                            if (file.type === 'file') {
-                                html += `
-                                    <div class="file-item" onclick="loadFile('${file.path}')">
-                                        ${file.name}
-                                    </div>
-                                `;
-                            } else if (file.type === 'dir') {
-                                html += `
-                                    <div class="dir-item">
-                                        ${file.name}/
-                                    </div>
-                                `;
-                            }
-                        });
-                        event.detail.target.innerHTML = html;
-                    } else if (response.error) {
-                        event.detail.target.innerHTML = `<div class="status error">${response.error}</div>`;
-                    }
-                } catch (e) {
-                    console.error('Failed to parse files response:', e);
-                }
-            }
-        });
-
-        // Create new file in current repo
-        function createNewFile() {
-            if (!currentRepo) {
-                document.getElementById('file-info').textContent = 'Please select a repository first';
+        function renderFilesList(files) {
+            const filesList = document.getElementById('files-list');
+            
+            if (files.length === 0) {
+                filesList.innerHTML = '<div class="empty-state">No files in this repository</div>';
                 return;
             }
 
+            let html = '';
+            files.forEach(file => {
+                if (file.type === 'file') {
+                    const isActive = currentFile && currentFile.path === file.path ? 'active' : '';
+                    html += `
+                        <div class="file-item ${isActive}" data-file-path="${file.path}" onclick="loadFile('${file.path}')">
+                            ${file.name}
+                        </div>
+                    `;
+                } else if (file.type === 'dir') {
+                    html += `
+                        <div class="dir-item">
+                            ${file.name}/
+                        </div>
+                    `;
+                }
+            });
+            filesList.innerHTML = html;
+        }
+
+
+        // Create new file in specific repo
+        function createNewFileInRepo(repoFullName) {
             const chatInput = document.getElementById('chat-input');
-            chatInput.value = `Create a new file called `;
+            chatInput.value = 'Create a new file called ';
             chatInput.focus();
             chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
+
+            // Show instruction in chat
+            console.log('Creating file in repo:', repoFullName);
+
+            // Set current repo context
+            currentRepo = repoFullName;
         }
 
         async function loadFile(filePath) {
             if (!currentRepo) {
-                document.getElementById('file-info').textContent = 'Please select a repository first';
+                console.error('No repository selected');
                 return;
             }
 
-            document.getElementById('file-info').innerHTML = '<span class="loading"></span> Loading file...';
+            console.log('Loading file:', filePath);
 
             try {
                 const response = await fetch(`/file?repo=${encodeURIComponent(currentRepo)}&path=${encodeURIComponent(filePath)}`);
                 const data = await response.json();
 
                 if (data.error) {
-                    document.getElementById('file-info').textContent = `Error: ${data.error}`;
+                    console.error('Error loading file:', data.error);
                     return;
                 }
 
@@ -679,14 +698,22 @@
                     sha: data.sha
                 };
 
-                document.getElementById('file-path').textContent = `${currentRepo}/${filePath}`;
-                document.getElementById('file-info').textContent = `SHA: ${data.sha.substring(0, 7)}...`;
+                // File loaded successfully
                 document.getElementById('editor').value = data.content;
                 document.getElementById('editor').disabled = false;
-                document.getElementById('save-btn').style.display = 'block';
+
+                // Update active file highlighting
+                document.querySelectorAll('.file-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+                
+                const activeFileItem = document.querySelector(`.file-item[data-file-path="${filePath}"]`);
+                if (activeFileItem) {
+                    activeFileItem.classList.add('active');
+                }
 
             } catch (error) {
-                document.getElementById('file-info').textContent = ` Error: ${error.message}`;
+                console.error('Error loading file:', error.message);
             }
         }
 
@@ -737,11 +764,9 @@
                 if (result.error) {
                     resultMsg.className = 'message system';
                     resultMsg.textContent = ` Error: ${result.error}`;
-                    document.getElementById('file-info').textContent = ` Save failed: ${result.error}`;
                 } else {
                     resultMsg.className = 'message assistant';
                     resultMsg.textContent = ` File saved successfully!`;
-                    document.getElementById('file-info').textContent = ' Saved successfully';
                     // Reload the file to get new SHA
                     setTimeout(() => loadFile(currentFile.path), 500);
                 }
@@ -757,7 +782,6 @@
                 errorMsg.textContent = ` Error: ${error.message}`;
                 chatMessages.appendChild(errorMsg);
                 chatMessages.scrollTop = chatMessages.scrollHeight;
-                document.getElementById('file-info').textContent = ` Error: ${error.message}`;
             }
         }
 
@@ -878,7 +902,7 @@
 
         function handleChatResponse(event) {
             const chatMessages = document.getElementById('chat-messages');
-            
+
             // Remove loading message
             const loadingMsg = document.getElementById('loading-msg');
             if (loadingMsg) {
@@ -886,14 +910,15 @@
             }
 
             if (event.detail.successful) {
-                const response = JSON.parse(event.detail.xhr.response);
+                try {
+                    const response = JSON.parse(event.detail.xhr.responseText);
 
-                if (response.error) {
-                    const errorMsg = document.createElement('div');
-                    errorMsg.className = 'message system';
-                    errorMsg.textContent = `Error: ${response.error}`;
-                    chatMessages.appendChild(errorMsg);
-                } else if (response.response) {
+                    if (response.error) {
+                        const errorMsg = document.createElement('div');
+                        errorMsg.className = 'message system';
+                        errorMsg.textContent = `Error: ${response.error}`;
+                        chatMessages.appendChild(errorMsg);
+                    } else if (response.response) {
                     const assistantMsg = document.createElement('div');
                     assistantMsg.className = 'message assistant';
                     
@@ -919,6 +944,39 @@
 
                     chatMessages.appendChild(assistantMsg);
 
+                    // Refresh UI based on successful operations
+                    if (response.toolCalls && response.toolCalls.length > 0) {
+                        response.toolCalls.forEach(tc => {
+                            if (tc.result && !tc.result.error) {
+                                // Refresh repository list after creating a repo
+                                if (tc.name === 'create_repo') {
+                                    const newRepoName = tc.args.name;
+                                    setTimeout(() => {
+                                        loadRepositories();
+                                        // Expand the newly created repo after a short delay
+                                        setTimeout(() => {
+                                            const newRepoElement = Array.from(document.querySelectorAll('.repo-item')).find(el =>
+                                                el.textContent.trim().includes(newRepoName)
+                                            );
+                                            if (newRepoElement && !newRepoElement.classList.contains('expanded')) {
+                                                newRepoElement.click();
+                                            }
+                                        }, 500);
+                                    }, 500);
+                                }
+                                // Refresh file list after creating a file
+                                else if (tc.name === 'update_file' && tc.args.path) {
+                                    if (currentRepo) {
+                                        // Refresh the files list
+                                        selectRepository(currentRepo);
+                                        // Load the newly created file in the editor
+                                        setTimeout(() => loadFile(tc.args.path), 1000);
+                                    }
+                                }
+                            }
+                        });
+                    }
+
                     // Add to history (unless it's a pending deletion)
                     if (!response.pendingDeletion) {
                         chatHistory.push({
@@ -926,11 +984,17 @@
                             parts: [{ text: response.response }]
                         });
                     }
+                    }
+                } catch (parseError) {
+                    const errorMsg = document.createElement('div');
+                    errorMsg.className = 'message system';
+                    errorMsg.textContent = `Error parsing response: ${parseError.message}`;
+                    chatMessages.appendChild(errorMsg);
                 }
             } else {
                 const errorMsg = document.createElement('div');
                 errorMsg.className = 'message system';
-                errorMsg.textContent = 'Failed to get response from AI';
+                errorMsg.textContent = `Request failed: ${event.detail.xhr.status} ${event.detail.xhr.statusText}`;
                 chatMessages.appendChild(errorMsg);
             }
 
