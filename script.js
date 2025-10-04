@@ -3,6 +3,14 @@ let currentRepo = null;
 let chatHistory = [];
 let pendingDeletion = null;
 let pendingDeletionType = null; // 'repo' or 'file'
+let pendingAction = null; // Tracks actions waiting for user input (e.g., 'awaiting_repo_name_for_delete')
+
+// Prefill the chat input with a command
+function prefillChat(command) {
+    const chatInput = document.getElementById('chat-input');
+    chatInput.value = command;
+    chatInput.focus();
+}
 
 // Show list of available tools
 function showToolsList() {
@@ -416,11 +424,23 @@ function handleChatSubmit(event) {
         chatMessages.appendChild(userMsg);
         chatMessages.scrollTop = chatMessages.scrollHeight;
         
+        // Add to history
+        chatHistory.push({
+            role: 'user',
+            parts: [{ text: message }]
+        });
+        
         // Clear input
         input.value = '';
         
         // Show the tools list directly
         showToolsList();
+        
+        // Add assistant response to history
+        chatHistory.push({
+            role: 'model',
+            parts: [{ text: 'Here are the available tools...' }]
+        });
         
         return;
     }
@@ -519,6 +539,31 @@ function handleChatSubmit(event) {
                     } else {
                         resultMsg.className = 'message assistant';
                         resultMsg.textContent = ` ${result.success}`;
+                        
+                        // ALWAYS clear files and editor after deleting a repo
+                        // Because the deleted repo might have been the one we were viewing
+                        console.log('Repository deleted, clearing UI state');
+                        console.log('Deleted repo:', pendingDeletion);
+                        console.log('Current repo was:', currentRepo);
+                        
+                        // Clear state
+                        currentRepo = null;
+                        currentFile = null;
+                        
+                        // Clear files list
+                        const filesList = document.getElementById('files-list');
+                        filesList.innerHTML = '<div class="empty-state">Select a repository to view files</div>';
+                        
+                        // Clear and disable editor
+                        const editor = document.getElementById('editor');
+                        editor.value = '';
+                        editor.disabled = true;
+                        
+                        // Update editor title
+                        const editorPanel = document.querySelector('.editor-panel h2');
+                        if (editorPanel) {
+                            editorPanel.textContent = 'Editor';
+                        }
                     }
                     chatMessages.appendChild(resultMsg);
                     chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -607,6 +652,17 @@ function handleChatResponse(event) {
                 const assistantMsg = document.createElement('div');
                 assistantMsg.className = 'message assistant';
 
+                // Check if this is awaiting user input
+                if (response.awaitingInput) {
+                    pendingAction = response.awaitingInput;
+                    assistantMsg.style.background = '#e3f2fd';
+                    assistantMsg.style.color = '#1565c0';
+                    assistantMsg.style.borderLeft = '3px solid #2196f3';
+                } else {
+                    // Clear pending action if no new awaiting input
+                    pendingAction = null;
+                }
+                
                 // Check if this is a deletion confirmation request
                 if (response.pendingDeletion) {
                     assistantMsg.style.background = '#fff3cd';
@@ -695,10 +751,9 @@ function handleChatResponse(event) {
                         // Refresh file list after creating a file
                         else if (tc.name === 'update_file' && tc.args.path) {
                             if (currentRepo) {
+                                console.log('File created/updated, refreshing file list for:', currentRepo);
                                 // Refresh the files list
-                                selectRepository(currentRepo);
-                                // Load the newly created file in the editor
-                                setTimeout(() => loadFile(tc.args.path), 1000);
+                                setTimeout(() => selectRepository(currentRepo), 500);
                             }
                         }
                         // Refresh file list after deleting a file
@@ -710,6 +765,33 @@ function handleChatResponse(event) {
                                 document.getElementById('editor').disabled = true;
                                 // Refresh the files list
                                 setTimeout(() => selectRepository(currentRepo), 500);
+                            }
+                        }
+                        // Clear files and editor after deleting a repo
+                        else if (tc.name === 'delete_repo') {
+                            const deletedRepo = tc.args.repo;
+                            console.log('Repository deleted:', deletedRepo);
+                            
+                            // If the deleted repo was the currently selected one, clear the UI
+                            if (currentRepo === deletedRepo) {
+                                console.log('Clearing files and editor for deleted repo:', deletedRepo);
+                                currentRepo = null;
+                                currentFile = null;
+                                
+                                // Clear files list
+                                const filesList = document.getElementById('files-list');
+                                filesList.innerHTML = '<div class="empty-state">Select a repository to view files</div>';
+                                
+                                // Clear and disable editor
+                                const editor = document.getElementById('editor');
+                                editor.value = '';
+                                editor.disabled = true;
+                                
+                                // Update editor title
+                                const editorPanel = document.querySelector('.editor-panel h2');
+                                if (editorPanel) {
+                                    editorPanel.textContent = 'Editor';
+                                }
                             }
                         }
                     }
@@ -766,6 +848,11 @@ document.addEventListener('htmx:afterSwap', function(event) {
                     } : null
                 };
                 event.detail.parameters.context = JSON.stringify(context);
+                
+                // Add pending action if exists
+                if (pendingAction) {
+                    event.detail.parameters.pendingAction = pendingAction;
+                }
             });
         }
     }

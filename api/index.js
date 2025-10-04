@@ -492,7 +492,55 @@ async function executeTool(toolName, args) {
 // Chat endpoint with AI
 app.post('/chat', async (req, res) => {
     try {
-        const { message, history, context } = req.body;
+        let { message, history, context, pendingAction } = req.body;
+        
+        // Parse history if it's a string
+        console.log('=== INITIAL HISTORY CHECK ===');
+        console.log('History type BEFORE parsing:', typeof history);
+        console.log('Is array BEFORE?:', Array.isArray(history));
+        
+        if (typeof history === 'string') {
+            try {
+                history = JSON.parse(history);
+                console.log('✅ Successfully parsed history from string');
+                console.log('History length after parse:', history.length);
+                console.log('Is array AFTER parse?:', Array.isArray(history));
+            } catch (e) {
+                console.error('Failed to parse history:', e);
+                history = [];
+            }
+        }
+        
+        console.log('=== FINAL HISTORY CHECK ===');
+        console.log('History type AFTER all parsing:', typeof history);
+        console.log('Is array FINAL?:', Array.isArray(history));
+        if (Array.isArray(history)) {
+            console.log('Final history length:', history.length);
+        }
+        
+        // Parse context if it's a string
+        console.log('=== CONTEXT PARSING ===');
+        console.log('Context type BEFORE:', typeof context);
+        console.log('Context value BEFORE:', context);
+
+        if (typeof context === 'string') {
+            try {
+                context = JSON.parse(context);
+                console.log('✅ Successfully parsed context');
+            } catch (e) {
+                console.error('Failed to parse context:', e);
+                context = null;
+            }
+        } else if (context && typeof context === 'object') {
+            console.log('Context is already object, no parsing needed');
+        } else {
+            console.log('Context is null or invalid');
+            context = null;
+        }
+
+        console.log('=== CONTEXT FINAL ===');
+        console.log('Context type AFTER:', typeof context);
+        console.log('Context value AFTER:', context);
 
         if (!geminiApiKey) {
             return res.json({ error: 'GEMINI_API_KEY not configured' });
@@ -502,6 +550,62 @@ app.post('/chat', async (req, res) => {
             return res.json({ error: 'GITHUB_TOKEN not configured' });
         }
 
+        // Handle pending actions (user providing follow-up info)
+        if (pendingAction === 'repo_name_for_create') {
+            console.log('=== HANDLING PENDING CREATE REPO ===');
+            console.log('User provided repo name:', message);
+            
+            // User is providing the repo name for creation
+            const repoName = message.trim();
+            
+            // Create the repo
+            const result = await executeTool('create_repo', { name: repoName });
+            
+            if (result.error) {
+                return res.json({
+                    response: `Failed to create repository: ${result.error}`
+                });
+            }
+            
+            return res.json({
+                response: `Repository <strong>${repoName}</strong> created successfully.`,
+                toolCalls: [{
+                    name: 'create_repo',
+                    args: { name: repoName },
+                    result
+                }]
+            });
+        }
+        
+        if (pendingAction === 'repo_name_for_delete') {
+            console.log('=== HANDLING PENDING DELETE REPO ===');
+            console.log('User provided repo name:', message);
+            
+            // User is providing the repo name for deletion
+            const repoName = message.trim();
+            const fullRepoName = `${githubUsername}/${repoName}`;
+            
+            // Check if repo exists
+            const repoCheckResponse = await githubFetch(`/repos/${fullRepoName}`);
+            if (!repoCheckResponse.ok) {
+                if (repoCheckResponse.status === 404) {
+                    return res.json({
+                        response: `Repository "${repoName}" not found.`
+                    });
+                } else {
+                    return res.json({
+                        response: `Error checking repository: ${repoCheckResponse.statusText}`
+                    });
+                }
+            }
+            
+            // Repo exists, ask for confirmation
+            return res.json({
+                response: `DANGER: You are about to PERMANENTLY DELETE "${fullRepoName}"\n\nThis will delete ALL code, issues, and history forever.\n\nType "yes" to confirm deletion, or anything else to cancel.`,
+                pendingDeletion: fullRepoName
+            });
+        }
+        
         // Handle force delete file command
         if (message.startsWith('FORCE_DELETE_FILE:')) {
             const parts = message.replace('FORCE_DELETE_FILE:', '').split(':');
@@ -548,32 +652,38 @@ When user mentions files without specifying repo, assume they mean repo: ${ctx.c
             }
         }
         
-        const systemPrompt = `You are a helpful GitHub AI assistant. You can have casual conversations AND execute GitHub operations using tools.
+        const systemPrompt = `You are a helpful GitHub AI assistant. You can have natural conversations and help users with GitHub operations.
 
-BE CONVERSATIONAL for greetings and small talk:
-- "hello", "hi", "hey" → Just respond naturally, be friendly
-- General questions that don't need tools → Respond conversationally
+For CONVERSATION:
+- Be friendly and conversational but professional
+- Answer questions about GitHub
+- Help users understand what you can do
+- DO NOT use emojis in your responses
+- Keep responses concise and direct
 
-USE TOOLS when users want to see information or do actions:
-- "what can you do", "show tools", "list tools", "help", "capabilities" → list_tools()
-- "list repositories", "show repos" → list_repos()
-- "create repo/repository" → create_repo()
-- "delete repo/repository" → delete_repo()
-- "list files", "show files" → list_files()
-- "read file", "show file" → read_file()
-- "create file", "update file", "edit file" → update_file()
-- "delete file" → delete_file()
+For GITHUB ACTIONS:
+- When users ask for specific GitHub operations, I'll handle the technical execution
+- You just respond naturally and conversationally
+- DO NOT suggest additional actions unless the user asks
+- DO NOT ask for additional parameters (visibility, etc.) - I handle defaults
+- All repositories are created as public by default
 
-IMPORTANT CONTEXT:${contextInfo}
+${contextInfo}
 
-When executing a tool, output ONLY the function call. NO explanations, NO code blocks, NO backticks.
-When being conversational, just respond naturally like a helpful assistant.`;
+Just have natural conversations. I'll handle the GitHub operations behind the scenes.`;
 
         const contents = [];
         
         // Add history if provided
         if (history && Array.isArray(history)) {
+            console.log('=== CHAT HISTORY RECEIVED ===');
+            console.log('History length:', history.length);
+            console.log('Last 3 messages:', history.slice(-3));
             contents.push(...history);
+        } else {
+            console.log('=== NO CHAT HISTORY ===');
+            console.log('History type:', typeof history);
+            console.log('History value:', history);
         }
         
         // Add current message
@@ -581,6 +691,9 @@ When being conversational, just respond naturally like a helpful assistant.`;
             role: 'user',
             parts: [{ text: message }]
         });
+        
+        console.log('=== TOTAL CONTENTS FOR AI ===');
+        console.log('Contents length:', contents.length);
 
         // Initial AI call with tools
         let response = await ai.models.generateContent({
@@ -629,15 +742,23 @@ When being conversational, just respond naturally like a helpful assistant.`;
         
         console.log('Final functionCalls:', functionCalls);
 
+        console.log('=== FUNCTION CALL DETECTION ===');
+        console.log('Function calls detected:', functionCalls);
+        console.log('Function calls length:', functionCalls ? functionCalls.length : 0);
+
         if (functionCalls && functionCalls.length > 0) {
+            console.log('=== EXECUTING FUNCTION CALLS ===');
             // Execute all function calls
             for (const functionCall of functionCalls) {
+                console.log('Executing:', functionCall.name, 'with args:', functionCall.args);
                 const result = await executeTool(functionCall.name, functionCall.args);
+                console.log('Execution result:', result);
                 toolCalls.push({
                     name: functionCall.name,
                     args: functionCall.args,
                     result
                 });
+                console.log('Added to toolCalls:', toolCalls[toolCalls.length - 1]);
             }
 
             // Make another call with the function results
@@ -648,35 +769,101 @@ When being conversational, just respond naturally like a helpful assistant.`;
                 }
             }));
 
-            // For list_tools, format the response directly without AI follow-up
-            if (toolCalls.length === 1 && toolCalls[0].name === 'list_tools' && toolCalls[0].result.tools) {
-                console.log('=== FORMATTING LIST_TOOLS FROM FUNCTION CALL ===');
-                console.log('Tools count:', toolCalls[0].result.tools.length);
-                responseText = "<strong>Here's what I can do:</strong><br><br>";
-                toolCalls[0].result.tools.forEach((tool, index) => {
-                    responseText += `${index + 1}. <strong>${tool.name}</strong>: ${tool.description}<br>`;
-                });
-                responseText += "<br>You can use these tools by clicking them in the sidebar, or by asking me in plain English!<br>For example: \"create a new repo called my-project\" or \"list my repositories\"";
-                console.log('=== FORMATTED RESPONSE ===');
-                console.log(responseText);
+            console.log('=== FORMATTING CHECK ===');
+            console.log('Tool calls after execution:', toolCalls.length);
+            console.log('Tool calls:', toolCalls.map(tc => ({ name: tc.name, result: tc.result })));
+
+            // Format certain tool responses directly without AI follow-up
+            if (toolCalls.length === 1) {
+                console.log('Single tool call detected, checking formatting...');
+                const toolCall = toolCalls[0];
+                console.log('Tool call name:', toolCall.name);
+                console.log('Tool call result keys:', Object.keys(toolCall.result));
+                console.log('Tool call result:', toolCall.result);
+                
+                // Format list_tools
+                if (toolCall.name === 'list_tools' && toolCall.result.tools) {
+                    console.log('=== FORMATTING LIST_TOOLS ===');
+                    responseText = "<strong>Here's what I can do:</strong><br><br>";
+                    toolCall.result.tools.forEach((tool, index) => {
+                        responseText += `${index + 1}. <strong>${tool.name}</strong>: ${tool.description}<br>`;
+                    });
+                    responseText += "<br>You can use these tools by clicking them in the sidebar, or by asking me in plain English!<br>For example: \"create a new repo called my-project\" or \"list my repositories\"";
+                } 
+                // Format list_repos
+                else if (toolCall.name === 'list_repos') {
+                    console.log('=== FORMATTING LIST_REPOS ===');
+                    console.log('list_repos result:', toolCall.result);
+                    console.log('list_repos result.repos:', toolCall.result.repos);
+                    responseText = "<strong>Your GitHub Repositories:</strong><br><br>";
+                    if (!toolCall.result.repos || toolCall.result.repos.length === 0) {
+                        responseText += "You don't have any repositories yet.<br><br>Want to create one? Just ask!";
+                    } else {
+                        toolCall.result.repos.forEach((repo, index) => {
+                            responseText += `${index + 1}. <strong>${repo.name}</strong><br>`;
+                        });
+                        responseText += `<br>Total: ${toolCall.result.repos.length} ${toolCall.result.repos.length === 1 ? 'repository' : 'repositories'}`;
+                    }
+                }
+                // Format create_repo
+                else if (toolCall.name === 'create_repo' && toolCall.result.success) {
+                    console.log('=== FORMATTING CREATE_REPO ===');
+                    console.log('Create repo args:', toolCall.args);
+                    console.log('Create repo result:', toolCall.result);
+                    const repoName = toolCall.args.name;
+                    responseText = `Repository <strong>${repoName}</strong> created successfully.`;
+                }
+                // Format delete_repo
+                else if (toolCall.name === 'delete_repo' && toolCall.result.success) {
+                    console.log('=== FORMATTING DELETE_REPO ===');
+                    responseText = `${toolCall.result.success}`;
+                }
+                // Format update_file
+                else if (toolCall.name === 'update_file' && toolCall.result.success) {
+                    console.log('=== FORMATTING UPDATE_FILE ===');
+                    const fileName = toolCall.args.path;
+                    responseText = `File <strong>${fileName}</strong> ${toolCall.result.success.includes('updated') ? 'updated' : 'created'} successfully.`;
+                }
+                // Format delete_file
+                else if (toolCall.name === 'delete_file' && toolCall.result.success) {
+                    console.log('=== FORMATTING DELETE_FILE ===');
+                    const fileName = toolCall.args.path;
+                    responseText = `File <strong>${fileName}</strong> deleted successfully.`;
+                } else {
+                    // For other single tool calls, let AI generate response
+                    const followUpResponse = await ai.models.generateContent({
+                        model: 'gemini-flash-lite-latest',
+                        contents: [
+                            { role: 'user', parts: [{ text: systemPrompt }] },
+                            ...contents,
+                            { role: 'model', parts: functionCalls.map(fc => ({ functionCall: fc })) },
+                            { role: 'function', parts: functionResponseParts }
+                        ],
+                        config: {
+                            thinkingConfig: { thinkingBudget: 0 }
+                        }
+                    });
+                    responseText = followUpResponse.text || 'Action completed';
+                }
             } else {
                 // For other tools, let the AI generate a natural response
-                const followUpResponse = await ai.models.generateContent({
-                    model: 'gemini-flash-lite-latest',
-                    contents: [
-                        { role: 'user', parts: [{ text: systemPrompt }] },
-                        ...contents,
-                        { role: 'model', parts: functionCalls.map(fc => ({ functionCall: fc })) },
-                        { role: 'function', parts: functionResponseParts }
-                    ],
-                    config: {
-                        thinkingConfig: { thinkingBudget: 0 }
-                    }
-                });
+            const followUpResponse = await ai.models.generateContent({
+                model: 'gemini-flash-lite-latest',
+                contents: [
+                    { role: 'user', parts: [{ text: systemPrompt }] },
+                    ...contents,
+                    { role: 'model', parts: functionCalls.map(fc => ({ functionCall: fc })) },
+                    { role: 'function', parts: functionResponseParts }
+                ],
+                config: {
+                    thinkingConfig: { thinkingBudget: 0 }
+                }
+            });
 
-                responseText = followUpResponse.text || 'Action completed';
+            responseText = followUpResponse.text || 'Action completed';
             }
         } else {
+            console.log('=== NO FUNCTION CALLS FROM AI ===');
             // Check if response has candidates structure
             let responseTextContent = response.text || '';
 
@@ -726,7 +913,7 @@ When being conversational, just respond naturally like a helpful assistant.`;
                 const functionCallMatch = cleanedText.match(/(\w+)\s*\(\s*([^)]*)\s*\)/);
 
                 let functionName = null;
-                let args = {};
+                    let args = {};
 
                 if (functionCallMatch) {
                     functionName = functionCallMatch[1];
@@ -752,240 +939,300 @@ When being conversational, just respond naturally like a helpful assistant.`;
                     // Check original message for direct commands
                     const originalMessage = message.trim();
                     console.log('Checking original message:', originalMessage);
-                    
-                    // If no function was called by AI, return the AI's natural response
-                    if (!functionName) {
-                        responseText = responseTextContent;
-                        return res.json({
-                            response: responseText
-                        });
+
+                    // Use AI to classify intent and extract parameters
+                    const intentPrompt = `Analyze this user message and determine the intent and extract parameters.
+
+User message: "${originalMessage}"
+Current repository context: ${context?.currentRepo || 'none'}
+
+Respond ONLY with JSON in this format:
+{
+  "intent": "create_repo" | "delete_repo" | "list_repos" | "list_tools" | "create_file" | "update_file" | "delete_file" | "none",
+  "repo_name": "extracted-name" | null,
+  "file_name": "extracted-filename" | null,
+  "file_content": "extracted-content" | null
+}
+
+Examples:
+- "create a repo called hello-world" → {"intent": "create_repo", "repo_name": "hello-world", "file_name": null, "file_content": null}
+- "delete the test-repo" → {"intent": "delete_repo", "repo_name": "test-repo", "file_name": null, "file_content": null}
+- "delete this repo" with context "compusophy-bot/newest" → {"intent": "delete_repo", "repo_name": "compusophy-bot/newest", "file_name": null, "file_content": null}
+- "list my repositories" → {"intent": "list_repos", "repo_name": null, "file_name": null, "file_content": null}
+- "create index.html file" → {"intent": "create_file", "repo_name": null, "file_name": "index.html", "file_content": null}
+- "create index.html with hello world" → {"intent": "create_file", "repo_name": null, "file_name": "index.html", "file_content": "hello world"}
+- "delete the README.md file" → {"intent": "delete_file", "repo_name": null, "file_name": "README.md", "file_content": null}
+- "hello how are you" → {"intent": "none", "repo_name": null, "file_name": null, "file_content": null}
+
+Note: 
+- If user says "this repo" or "current repo", use the current repository context as the repo_name (keep full format with owner/)
+- If repo_name is null but there's a current repository context, use that repository
+
+JSON:`;
+
+                    const intentResponse = await ai.models.generateContent({
+                        model: 'gemini-flash-lite-latest',
+                        contents: [{ role: 'user', parts: [{ text: intentPrompt }] }],
+                        config: { thinkingConfig: { thinkingBudget: 0 } }
+                    });
+
+                    let intentData = { intent: 'none', repo_name: null, file_name: null, file_content: null };
+                    try {
+                        const intentText = intentResponse.text?.trim() || '{}';
+                        // Remove markdown code blocks if present
+                        const cleanedIntent = intentText.replace(/```json\n?|\n?```/g, '').trim();
+                        intentData = JSON.parse(cleanedIntent);
+                        console.log('AI parsed intent:', intentData);
+                    } catch (e) {
+                        console.error('Failed to parse intent JSON:', e);
+                        console.log('Raw intent response:', intentResponse.text);
                     }
-                    
-                    if (originalMessage.toLowerCase().includes("delete the repository")) {
-                        functionName = 'delete_repo';
-                        // Extract repository name from quotes or after "repository "
-                        let repoMatch = originalMessage.match(/[Dd]elete the repository ['"](.+?)['"]/);
-                        console.log('Regex with quotes result:', repoMatch);
-                        if (!repoMatch) {
-                            // Try without quotes
-                            repoMatch = originalMessage.match(/[Dd]elete the repository\s+(\S+)/);
-                            console.log('Regex without quotes result:', repoMatch);
-                        }
-                        if (repoMatch) {
-                            args.repo = `${githubUsername}/${repoMatch[1]}`;
-                            console.log('Extracted delete repo args:', args);
+
+                    // Handle based on intent
+                    if (intentData.intent === 'create_repo') {
+                        if (intentData.repo_name) {
+                            functionName = 'create_repo';
+                            args.name = intentData.repo_name;
+                            console.log('Create repo with extracted name:', args);
                         } else {
-                            console.log('Failed to extract repo name from:', originalMessage);
-                        }
-                    } else if (cleanedText.includes("Delete the repository")) {
-                        functionName = 'delete_repo';
-                        // Extract repository name from quotes or after "repository "
-                        let repoMatch = cleanedText.match(/Delete the repository ['"](.+?)['"]/);
-                        if (!repoMatch) {
-                            // Try without quotes
-                            repoMatch = cleanedText.match(/Delete the repository\s+(\S+)/);
-                        }
-                        if (repoMatch) {
-                            args.repo = `${githubUsername}/${repoMatch[1]}`;
-                            console.log('Extracted delete repo args from cleaned text:', args);
-                        }
-                    } else if (cleanedText.includes("Create a new repository called")) {
-                        functionName = 'create_repo';
-                        // Extract repository name from quotes or after "called "
-                        let repoMatch = cleanedText.match(/Create a new repository called ['"](.+?)['"]/);
-                        if (!repoMatch) {
-                            repoMatch = cleanedText.match(/Create a new repository called\s+(\S+)/);
-                        }
-                        if (repoMatch) {
-                            args.name = repoMatch[1];
-                        }
-                    } else if (originalMessage.toLowerCase().includes("delete the file")) {
-                        functionName = 'delete_file';
-                        // Extract file name from quotes or after "file "
-                        let fileMatch = originalMessage.match(/[Dd]elete the file ['"](.+?)['"]/);
-                        console.log('Regex with quotes result for file:', fileMatch);
-                        if (!fileMatch) {
-                            // Try without quotes
-                            fileMatch = originalMessage.match(/[Dd]elete the file\s+(\S+)/);
-                            console.log('Regex without quotes result for file:', fileMatch);
-                        }
-                        if (fileMatch) {
-                            args.path = fileMatch[1];
-                            console.log('Extracted delete file args:', args);
-                        } else {
-                            console.log('Failed to extract file name from:', originalMessage);
-                        }
-                    } else if (cleanedText.includes("Delete the file")) {
-                        functionName = 'delete_file';
-                        // Extract file name from quotes or after "file "
-                        let fileMatch = cleanedText.match(/Delete the file ['"](.+?)['"]/);
-                        if (!fileMatch) {
-                            // Try without quotes
-                            fileMatch = cleanedText.match(/Delete the file\s+(\S+)/);
-                        }
-                        if (fileMatch) {
-                            args.path = fileMatch[1];
-                            console.log('Extracted delete file args from cleaned text:', args);
-                        }
-                    } else if (cleanedText.includes("Create a new file called")) {
-                        functionName = 'update_file';
-                        // Extract filename from quotes or after "called "
-                        let fileMatch = cleanedText.match(/Create a new file called ['"](.+?)['"]/);
-                        if (!fileMatch) {
-                            fileMatch = cleanedText.match(/Create a new file called\s+(\S+)/);
-                        }
-                        if (fileMatch) {
-                            args.path = fileMatch[1];
-                            args.content = `# ${fileMatch[1]}\n\nCreated by GitHub AI Agent\n\nAdd your content here...`;
-                            args.message = `Create ${fileMatch[1]}`;
+                            console.log('Create repo intent but no name - asking for repo name');
+                            return res.json({
+                                response: `What would you like to name your new repository?<br><br>Just provide the repository name (e.g., "my-awesome-project")`,
+                                awaitingInput: 'repo_name_for_create'
+                            });
                         }
                     }
-                }
-
-                if (functionName) {
-                    console.log('Parsed function:', functionName, 'with args:', args);
-
-                    // Use context to fill in missing arguments
-                    if (context) {
-                        try {
-                            const ctx = JSON.parse(context);
-                            console.log('Context parsed:', ctx);
-                            
-                            // For delete_repo, use currentRepo if repo not in args
-                            if (functionName === 'delete_repo' && !args.repo && ctx.currentRepo) {
-                                args.repo = ctx.currentRepo;
-                                console.log('Using context repo for delete_repo:', args.repo);
-                            }
-                            
-                            // For delete_file, use currentFile if path not in args
-                            if (functionName === 'delete_file' && !args.path && ctx.currentFile) {
-                                args.repo = ctx.currentFile.repo;
-                                args.path = ctx.currentFile.path;
-                                console.log('Using context file for delete_file:', args);
-                            }
-                            
-                            // For other file operations, use the current repository context
-                            if (ctx.currentRepo && !args.repo) {
-                                if (functionName === 'update_file' || functionName === 'read_file' || functionName === 'list_files') {
-                                    args.repo = ctx.currentRepo;
-                                    console.log('Using context repo:', args.repo);
-                                }
-                            }
-                        } catch (e) {
-                            console.error('Failed to parse context for args:', e);
-                        }
-                    }
-
-                    // Validate required arguments
-                    if (functionName === 'delete_repo' && !args.repo) {
-                        responseText = `❌ Please select a repository first, or specify it in your request. Example: "Delete the repository 'repository-name'"`;
-                        return res.json({
-                            response: responseText
-                        });
-                    } else if (functionName === 'delete_file' && (!args.repo || !args.path)) {
-                        responseText = `❌ Please select a file first, or specify it in your request. Example: "Delete the file 'filename.txt'"`;
-                        return res.json({
-                            response: responseText
-                        });
-                    } else if (functionName === 'create_repo' && !args.name) {
-                        responseText = `❌ Please specify a repository name. Example: "Create a new repository called 'my-repo'"`;
-                        return res.json({
-                            response: responseText
-                        });
-                    } else if (functionName === 'update_file' && (!args.path || !args.content)) {
-                        responseText = `❌ Please specify a filename and content. Example: "Create a new file called 'myfile.txt'"`;
-                        return res.json({
-                            response: responseText
-                        });
-                    }
-
-                    // For file operations, we need a current repository context
-                    if ((functionName === 'update_file' || functionName === 'read_file' || functionName === 'list_files' || functionName === 'delete_file') && !args.repo) {
-                        responseText = `❌ Please select a repository first, or specify it in your request.`;
-                        return res.json({
-                            response: responseText
-                        });
-                    }
-
-                    // Check if this is a destructive operation
-                    if (functionName === 'delete_repo') {
-                        // First, check if the repo exists
-                        const repoCheckResponse = await githubFetch(`/repos/${args.repo}`);
+                    else if (intentData.intent === 'delete_repo') {
+                        // Use extracted repo_name, or fall back to current repo context
+                        let repoToDelete = intentData.repo_name || context?.currentRepo;
                         
+                        if (repoToDelete) {
+                            functionName = 'delete_repo';
+                            // Check if repo_name already has username prefix
+                            args.repo = repoToDelete.includes('/') 
+                                ? repoToDelete 
+                                : `${githubUsername}/${repoToDelete}`;
+                            console.log('Delete repo with extracted name:', args);
+                        } else {
+                            console.log('Delete repo intent but no name - asking for repo name');
+                            return res.json({
+                                response: `Which repository would you like to delete?<br><br>Just provide the repository name (e.g., "hello-world")`,
+                                awaitingInput: 'repo_name_for_delete'
+                            });
+                        }
+                    }
+                    else if (intentData.intent === 'list_repos') {
+                        functionName = 'list_repos';
+                        console.log('List repos intent detected');
+                    }
+                    else if (intentData.intent === 'list_tools') {
+                        functionName = 'list_tools';
+                        console.log('List tools intent detected');
+                    }
+                    else if (intentData.intent === 'create_file' || intentData.intent === 'update_file') {
+                        if (intentData.file_name) {
+                            functionName = 'update_file';
+                            // Use repo_name if provided, otherwise use current repo context
+                            let targetRepo = context?.currentRepo;
+                            if (intentData.repo_name) {
+                                // Check if repo_name already has username prefix
+                                targetRepo = intentData.repo_name.includes('/') ? intentData.repo_name : `${githubUsername}/${intentData.repo_name}`;
+                            }
+                            
+                            if (!targetRepo) {
+                                console.log('File creation intent but no repo context');
+                                return res.json({
+                                    response: `Which repository should I create this file in?<br><br>Please select a repository first or specify it in your request.`
+                                });
+                            }
+                            
+                            // Generate appropriate file content using AI coding agent
+                            let fileContent = intentData.file_content;
+                            
+                            if (!fileContent) {
+                                console.log('=== CODING AGENT: Generating content for', intentData.file_name);
+                                
+                                const codingPrompt = `You are a coding agent. Generate appropriate starter/boilerplate code for the file: ${intentData.file_name}
+
+File name: ${intentData.file_name}
+Repository context: ${targetRepo}
+User request: ${originalMessage}
+
+Based on the file extension, generate ONLY the file content with NO explanations, NO markdown code blocks, NO additional text.
+
+Rules:
+- For .html files: Create a modern, clean HTML5 boilerplate
+- For .css files: Create a basic CSS reset and starter styles
+- For .js files: Create a clean JavaScript file with comments
+- For .py files: Create a Python file with proper structure
+- For .md files: Create a README with appropriate structure
+- For .json files: Create valid JSON structure
+- For .txt files: Create simple text content
+- For other files: Generate appropriate content based on extension
+
+Generate the raw file content NOW (no markdown, no explanations):`;
+
+                                const codingResponse = await ai.models.generateContent({
+                                    model: 'gemini-flash-lite-latest',
+                                    contents: [{ role: 'user', parts: [{ text: codingPrompt }] }],
+                                    config: { thinkingConfig: { thinkingBudget: 0 } }
+                                });
+
+                                fileContent = codingResponse.text?.trim() || '';
+                                
+                                // Remove markdown code blocks if AI added them despite instructions
+                                fileContent = fileContent.replace(/```[\w]*\n?/g, '').replace(/```/g, '').trim();
+                                
+                                console.log('Generated content length:', fileContent.length);
+                                console.log('Generated content preview:', fileContent.substring(0, 200));
+                            }
+                            
+                            args.repo = targetRepo;
+                            args.path = intentData.file_name;
+                            args.content = fileContent;
+                            args.message = `Create ${intentData.file_name}`;
+                            console.log('Create file with extracted params:', args);
+                        } else {
+                            console.log('File creation intent but no filename');
+                            return res.json({
+                                response: `What would you like to name the file?<br><br>Example: "index.html", "README.md", "script.js"`
+                            });
+                        }
+                    }
+                    else if (intentData.intent === 'delete_file') {
+                        if (intentData.file_name) {
+                            functionName = 'delete_file';
+                            // Use repo_name if provided, otherwise use current repo context
+                            let targetRepo = context?.currentRepo;
+                            if (intentData.repo_name) {
+                                // Check if repo_name already has username prefix
+                                targetRepo = intentData.repo_name.includes('/') ? intentData.repo_name : `${githubUsername}/${intentData.repo_name}`;
+                            }
+                            
+                            if (!targetRepo) {
+                                console.log('File deletion intent but no repo context');
+                                return res.json({
+                                    response: `Which repository is this file in?<br><br>Please select a repository first or specify it in your request.`
+                                });
+                            }
+                            
+                            args.repo = targetRepo;
+                            args.path = intentData.file_name;
+                            args.message = `Delete ${intentData.file_name}`;
+                            console.log('Delete file with extracted params:', args);
+                        } else {
+                            console.log('File deletion intent but no filename');
+                            return res.json({
+                                response: `Which file would you like to delete?<br><br>Please specify the filename.`
+                            });
+                        }
+                    }
+
+                    // If function was detected by manual parsing, execute it
+                    if (functionName) {
+                        console.log('Function detected, proceeding with execution');
+                        console.log('Executing manually detected function:', functionName, 'with args:', args);
+                        
+                        // Handle delete_repo confirmation
+                    if (functionName === 'delete_repo') {
+                            // Check if repo exists
+                        const repoCheckResponse = await githubFetch(`/repos/${args.repo}`);
                         if (!repoCheckResponse.ok) {
                             if (repoCheckResponse.status === 404) {
-                                responseText = `❌ Repository "${args.repo}" not found. Cannot delete a repository that doesn't exist.`;
+                                    return res.json({
+                                        response: `Repository "${args.repo}" not found.`
+                                    });
                             } else {
-                                responseText = `❌ Error checking repository: ${repoCheckResponse.statusText}`;
-                            }
-                            
                             return res.json({
-                                response: responseText
+                                        response: `Error checking repository: ${repoCheckResponse.statusText}`
                             });
+                                }
                         }
                         
                         // Repo exists, ask for confirmation
-                        responseText = `⚠️ DANGER: You are about to PERMANENTLY DELETE "${args.repo}"\n\nThis will delete ALL code, issues, and history forever.\n\nType "yes" to confirm deletion, or anything else to cancel.`;
-                        
-                        // Return special structure so frontend knows to wait for confirmation
                         return res.json({
-                            response: responseText,
+                                response: `DANGER: You are about to PERMANENTLY DELETE "${args.repo}"\n\nThis will delete ALL code, issues, and history forever.\n\nType "yes" to confirm deletion, or anything else to cancel.`,
                             pendingDeletion: args.repo
                         });
-                    } else if (functionName === 'delete_file') {
-                        // First, check if the file exists
-                        const fileCheckResponse = await githubFetch(`/repos/${args.repo}/contents/${args.path}`);
-                        
-                        if (!fileCheckResponse.ok) {
-                            if (fileCheckResponse.status === 404) {
-                                responseText = `❌ File "${args.path}" not found in repository "${args.repo}". Cannot delete a file that doesn't exist.`;
-                            } else {
-                                responseText = `❌ Error checking file: ${fileCheckResponse.statusText}`;
-                            }
-                            
-                            return res.json({
-                                response: responseText
-                            });
                         }
                         
-                        // File exists, ask for confirmation
-                        responseText = `⚠️ WARNING: You are about to PERMANENTLY DELETE "${args.path}"\n\nThis will delete the file from "${args.repo}" forever.\n\nType "yes" to confirm deletion, or anything else to cancel.`;
-                        
-                        // Return special structure so frontend knows to wait for confirmation
-                        // Store both repo and path in pendingDeletion
-                        return res.json({
-                            response: responseText,
-                            pendingDeletion: `${args.repo}:::${args.path}`,
-                            deletionType: 'file'
-                        });
-                    } else {
-                        // Execute the function call
                         const result = await executeTool(functionName, args);
+                        console.log('Manual execution result:', result);
+
                         toolCalls.push({
                             name: functionName,
                             args: args,
                             result
                         });
 
-                        // For list_tools, format the response nicely
-                        if (functionName === 'list_tools' && result.tools) {
-                            console.log('Formatting list_tools response, tools:', result.tools.length);
+                        console.log('Added manual tool call to toolCalls:', toolCalls[toolCalls.length - 1]);
+                        
+                        // Format the response based on the tool
+                        const toolCall = toolCalls[0];
+                        
+                        if (functionName === 'list_tools' && toolCall.result.tools) {
+                            console.log('=== FORMATTING LIST_TOOLS (MANUAL) ===');
                             responseText = "<strong>Here's what I can do:</strong><br><br>";
-                            result.tools.forEach((tool, index) => {
+                            toolCall.result.tools.forEach((tool, index) => {
                                 responseText += `${index + 1}. <strong>${tool.name}</strong>: ${tool.description}<br>`;
                             });
                             responseText += "<br>You can use these tools by clicking them in the sidebar, or by asking me in plain English!<br>For example: \"create a new repo called my-project\" or \"list my repositories\"";
-                            console.log('Formatted response:', responseText);
-                        } else {
-                            responseText = `Action completed: ${functionName}`;
-                        }
-                    }
+                        } else if (functionName === 'list_repos') {
+                            console.log('=== FORMATTING LIST_REPOS (MANUAL) ===');
+                            console.log('list_repos result:', toolCall.result);
+                            responseText = "<strong>Your GitHub Repositories:</strong><br><br>";
+                            if (!toolCall.result.repos || toolCall.result.repos.length === 0) {
+                                responseText += "You don't have any repositories yet.<br><br>Want to create one? Just ask!";
+                            } else {
+                                toolCall.result.repos.forEach((repo, index) => {
+                                    responseText += `${index + 1}. <strong>${repo.name}</strong><br>`;
+                                });
+                                responseText += `<br>Total: ${toolCall.result.repos.length} ${toolCall.result.repos.length === 1 ? 'repository' : 'repositories'}`;
+                            }
+                        } else if (functionName === 'create_repo' && toolCall.result.success) {
+                            console.log('=== FORMATTING CREATE_REPO (MANUAL) ===');
+                            const repoName = args.name;
+                            responseText = `Repository <strong>${repoName}</strong> created successfully.`;
+                        } else if (functionName === 'delete_repo') {
+                            console.log('=== FORMATTING DELETE_REPO (MANUAL) ===');
+                            if (toolCall.result.error) {
+                                // Check if repo name was extracted
+                                if (!args.repo) {
+                                    responseText = `I couldn't find the repository name in your request. Please specify which repository you want to delete.<br><br>Example: "delete the hello-world repo"`;
                 } else {
-                    responseText = responseTextContent || 'No response generated';
+                                    responseText = `Repository not found or couldn't be deleted: ${args.repo}`;
+                                }
+                            } else if (toolCall.result.success) {
+                                responseText = `${toolCall.result.success}`;
+                            } else {
+                                responseText = `An error occurred while deleting the repository`;
+                            }
+                        } else if (functionName === 'update_file' && toolCall.result.success) {
+                            console.log('=== FORMATTING UPDATE_FILE (MANUAL) ===');
+                            const fileName = args.path;
+                            responseText = `File <strong>${fileName}</strong> ${toolCall.result.success.includes('updated') ? 'updated' : 'created'} successfully.`;
+                        } else if (functionName === 'delete_file' && toolCall.result.success) {
+                            console.log('=== FORMATTING DELETE_FILE (MANUAL) ===');
+                            const fileName = args.path;
+                            responseText = `File <strong>${fileName}</strong> deleted successfully.`;
+                        } else {
+                            // For other tools, let AI handle response
+                            responseText = responseTextContent;
+                        }
+                    } else {
+                        // If no function was called by AI, return the AI's natural response
+                        console.log('No function detected - returning AI response');
+                        responseText = responseTextContent;
+                        return res.json({
+                            response: responseText
+                        });
+                    }
                 }
+
             }
         }
 
+        console.log('Reached end - responseText:', responseText);
         res.json({
             response: responseText,
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined
