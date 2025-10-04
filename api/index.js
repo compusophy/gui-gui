@@ -548,39 +548,26 @@ When user mentions files without specifying repo, assume they mean repo: ${ctx.c
             }
         }
         
-        const systemPrompt = `You are a helpful GitHub AI assistant. You can engage in conversation AND execute GitHub operations using tools.
+        const systemPrompt = `You are a helpful GitHub AI assistant. You can have casual conversations AND execute GitHub operations using tools.
 
-CONVERSATIONAL MODE:
-- For general questions like "what can you do", "help", "hello" - respond conversationally
-- Use the list_tools() function when users ask about capabilities
-- Be friendly and conversational for casual interactions
+BE CONVERSATIONAL for greetings and small talk:
+- "hello", "hi", "hey" → Just respond naturally, be friendly
+- General questions that don't need tools → Respond conversationally
 
-TOOL EXECUTION MODE:
-Only use tools when users explicitly request GitHub operations like:
-- "list my repositories", "show repos", "create repo", "delete repo"
-- "create file", "update file", "delete file", "read file"
-- "list files", "show files in repo"
+USE TOOLS when users want to see information or do actions:
+- "what can you do", "show tools", "list tools", "help", "capabilities" → list_tools()
+- "list repositories", "show repos" → list_repos()
+- "create repo/repository" → create_repo()
+- "delete repo/repository" → delete_repo()
+- "list files", "show files" → list_files()
+- "read file", "show file" → read_file()
+- "create file", "update file", "edit file" → update_file()
+- "delete file" → delete_file()
 
-AVAILABLE TOOLS:
-- list_tools() - Shows all available tools and capabilities
-- list_repos() - Lists all repositories
-- create_repo(name, description, private) - Creates a new repository
-- delete_repo(repo) - Deletes a repository (format: username/repo-name)
-- list_files(repo, path) - Lists files in a repo
-- read_file(repo, path) - Reads a file
-- update_file(repo, path, content, message) - Updates OR CREATES a file (creates if doesn't exist)
-- delete_file(repo, path, message) - Deletes a file from a repository
+IMPORTANT CONTEXT:${contextInfo}
 
-IMPORTANT RULES:
-1. When user has a file open and says "update this", "change the readme", etc. - use the CURRENT CONTEXT below
-2. If user says "create a new file", use update_file with the new filename and content
-3. If unclear which repo/file they mean, ASK a clarifying question instead of guessing
-4. When user wants to do something across "all repos", first call list_repos(), then iterate through each one
-5. Use the current file content as a starting point when making edits
-6. For new files, provide appropriate default content if not specified
-7. Call tools directly - don't just describe what you would do${contextInfo}
-
-When ready to act, output ONLY the function call. NO explanations, NO code blocks, NO backticks.`;
+When executing a tool, output ONLY the function call. NO explanations, NO code blocks, NO backticks.
+When being conversational, just respond naturally like a helpful assistant.`;
 
         const contents = [];
         
@@ -661,20 +648,34 @@ When ready to act, output ONLY the function call. NO explanations, NO code block
                 }
             }));
 
-            const followUpResponse = await ai.models.generateContent({
-                model: 'gemini-flash-lite-latest',
-                contents: [
-                    { role: 'user', parts: [{ text: systemPrompt }] },
-                    ...contents,
-                    { role: 'model', parts: functionCalls.map(fc => ({ functionCall: fc })) },
-                    { role: 'function', parts: functionResponseParts }
-                ],
-                config: {
-                    thinkingConfig: { thinkingBudget: 0 }
-                }
-            });
+            // For list_tools, format the response directly without AI follow-up
+            if (toolCalls.length === 1 && toolCalls[0].name === 'list_tools' && toolCalls[0].result.tools) {
+                console.log('=== FORMATTING LIST_TOOLS FROM FUNCTION CALL ===');
+                console.log('Tools count:', toolCalls[0].result.tools.length);
+                responseText = "<strong>Here's what I can do:</strong><br><br>";
+                toolCalls[0].result.tools.forEach((tool, index) => {
+                    responseText += `${index + 1}. <strong>${tool.name}</strong>: ${tool.description}<br>`;
+                });
+                responseText += "<br>You can use these tools by clicking them in the sidebar, or by asking me in plain English!<br>For example: \"create a new repo called my-project\" or \"list my repositories\"";
+                console.log('=== FORMATTED RESPONSE ===');
+                console.log(responseText);
+            } else {
+                // For other tools, let the AI generate a natural response
+                const followUpResponse = await ai.models.generateContent({
+                    model: 'gemini-flash-lite-latest',
+                    contents: [
+                        { role: 'user', parts: [{ text: systemPrompt }] },
+                        ...contents,
+                        { role: 'model', parts: functionCalls.map(fc => ({ functionCall: fc })) },
+                        { role: 'function', parts: functionResponseParts }
+                    ],
+                    config: {
+                        thinkingConfig: { thinkingBudget: 0 }
+                    }
+                });
 
-            responseText = followUpResponse.text || 'Action completed';
+                responseText = followUpResponse.text || 'Action completed';
+            }
         } else {
             // Check if response has candidates structure
             let responseTextContent = response.text || '';
@@ -966,7 +967,18 @@ When ready to act, output ONLY the function call. NO explanations, NO code block
                             result
                         });
 
-                        responseText = `Action completed: ${functionName}`;
+                        // For list_tools, format the response nicely
+                        if (functionName === 'list_tools' && result.tools) {
+                            console.log('Formatting list_tools response, tools:', result.tools.length);
+                            responseText = "<strong>Here's what I can do:</strong><br><br>";
+                            result.tools.forEach((tool, index) => {
+                                responseText += `${index + 1}. <strong>${tool.name}</strong>: ${tool.description}<br>`;
+                            });
+                            responseText += "<br>You can use these tools by clicking them in the sidebar, or by asking me in plain English!<br>For example: \"create a new repo called my-project\" or \"list my repositories\"";
+                            console.log('Formatted response:', responseText);
+                        } else {
+                            responseText = `Action completed: ${functionName}`;
+                        }
                     }
                 } else {
                     responseText = responseTextContent || 'No response generated';

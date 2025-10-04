@@ -4,6 +4,27 @@ let chatHistory = [];
 let pendingDeletion = null;
 let pendingDeletionType = null; // 'repo' or 'file'
 
+// Show list of available tools
+function showToolsList() {
+    const chatMessages = document.getElementById('chat-messages');
+    
+    const toolsMsg = document.createElement('div');
+    toolsMsg.className = 'message assistant';
+    toolsMsg.innerHTML = `<strong>Available Tools:</strong><br><br>
+        1. <strong>List Tools</strong> - Shows this list of available tools<br>
+        2. <strong>List Repositories</strong> - Shows all your GitHub repositories<br>
+        3. <strong>Create Repository</strong> - Creates a new GitHub repository<br>
+        4. <strong>Delete Repository</strong> - Deletes a repository (requires confirmation)<br>
+        5. <strong>Create File</strong> - Creates a new file in the current repository<br>
+        6. <strong>Save File</strong> - Saves changes to the currently open file<br>
+        7. <strong>Delete File</strong> - Deletes the currently selected file (requires confirmation)<br><br>
+        You can use these tools by clicking them in the sidebar, or by asking me in plain English!<br>
+        For example: "create a new repo called my-project" or "list my repositories"`;
+    
+    chatMessages.appendChild(toolsMsg);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
 // Tool execution function
 async function executeTool(toolName, args = {}) {
     try {
@@ -379,6 +400,31 @@ function handleChatSubmit(event) {
         return;
     }
 
+    // Check for direct tool list request
+    const lowerMessage = message.toLowerCase();
+    if (lowerMessage === 'list tools' || lowerMessage === 'show tools' || 
+        lowerMessage === 'what can you do' || lowerMessage === 'what can you do?' ||
+        lowerMessage === 'help' || lowerMessage === 'tools') {
+        event.preventDefault();
+        
+        const chatMessages = document.getElementById('chat-messages');
+        
+        // Add user message to chat
+        const userMsg = document.createElement('div');
+        userMsg.className = 'message user';
+        userMsg.textContent = message;
+        chatMessages.appendChild(userMsg);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        
+        // Clear input
+        input.value = '';
+        
+        // Show the tools list directly
+        showToolsList();
+        
+        return;
+    }
+
     // Check if we're waiting for deletion confirmation
     if (pendingDeletion) {
         event.preventDefault();
@@ -617,7 +663,12 @@ function handleChatResponse(event) {
                     }
                 }
 
-                assistantMsg.textContent = cleanResponse;
+                // Use innerHTML if response contains HTML tags, otherwise use textContent
+                if (cleanResponse.includes('<br>') || cleanResponse.includes('<strong>')) {
+                    assistantMsg.innerHTML = cleanResponse;
+                } else {
+                    assistantMsg.textContent = cleanResponse;
+                }
 
             chatMessages.appendChild(assistantMsg);
 
